@@ -12,6 +12,7 @@ import '../models/models.dart';
 import '../providers/app_state.dart';
 import '../utils/format.dart';
 import '../widgets/account_card.dart';
+import '../widgets/common.dart';
 import 'category_chart_page.dart';
 import 'finance/account_detail.dart';
 import 'finance/transaction_form.dart';
@@ -51,11 +52,19 @@ class HomeScreen extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
         child: Column(children: [
           const _ClockCard(),
+          if (regular.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _DailyLimitCard(
+                available: s.regularAvailable,
+                daysLeft: s.daysLeftInMonth,
+                perDay: s.dailyLimit,
+                hidden: s.hideBalances),
+          ],
           const SizedBox(height: 10),
           // quick actions
           Row(children: [
             Expanded(
-              child: FilledButton.icon(
+              child: OutlinedButton.icon(
                 icon: const Icon(Icons.add),
                 label: const FittedBox(child: Text('Transaction')),
                 onPressed: () {
@@ -110,7 +119,8 @@ class HomeScreen extends StatelessWidget {
                 for (final r in regular)
                   AccountCard(
                     summary: r,
-                    hidden: s.hideBalances,
+                    hidden: s.isHidden(r.account.id!),
+                    onToggleHidden: () => s.toggleAccountHidden(r.account.id!),
                     size: AccountCardSize.compact,
                     showIndent: false,
                     onTap: () => Navigator.push(
@@ -182,12 +192,74 @@ class _ClockCardState extends State<_ClockCard> {
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.access_time, size: 16, color: cs.onPrimaryContainer),
           const SizedBox(width: 8),
-          Text(fmtClock.format(_now),
-              style: TextStyle(
-                  color: cs.onPrimaryContainer,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  fontFeatures: const [FontFeature.tabularFigures()])),
+          // day name + date + running time; scales down on narrow screens
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(fmtClock.format(_now),
+                  style: TextStyle(
+                      color: cs.onPrimaryContainer,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// "Daily limit": available balance of all regular accounts divided by the
+/// number of days left in the current month (today included).
+class _DailyLimitCard extends StatelessWidget {
+  final int available; // sum of regular accounts' available balance
+  final int daysLeft;
+  final int perDay;
+  final bool hidden;
+  const _DailyLimitCard(
+      {required this.available,
+      required this.daysLeft,
+      required this.perDay,
+      required this.hidden});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // red when the available money is already negative
+    final color = perDay < 0 ? debitColor(context) : cs.onSecondaryContainer;
+    return Card(
+      margin: EdgeInsets.zero,
+      color: cs.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+        child: Row(children: [
+          Icon(Icons.speed, color: cs.onSecondaryContainer),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Daily limit',
+                  style: TextStyle(
+                      fontSize: 12, color: cs.onSecondaryContainer.withValues(alpha: .8))),
+              Text(
+                  '${formatInr(available, hidden: hidden)}  ÷  $daysLeft day${daysLeft == 1 ? '' : 's'} left',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11, color: cs.onSecondaryContainer.withValues(alpha: .8))),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 170),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text('${formatInr(perDay, hidden: hidden)} / day',
+                  style: TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w500, color: color)),
+            ),
+          ),
         ]),
       ),
     );

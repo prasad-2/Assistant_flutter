@@ -12,8 +12,8 @@ final DateFormat fmtDateTime = DateFormat('dd-MMM-yy HH:mm');
 /// Date only: dd-MMM-yy
 final DateFormat fmtDate = DateFormat('dd-MMM-yy');
 
-/// Running clock on the home screen: dd-MMM-yyyy HH:mm:ss
-final DateFormat fmtClock = DateFormat('dd-MMM-yyyy HH:mm:ss');
+/// Running clock on the home screen: day, dd-MMM-yyyy HH:mm:ss
+final DateFormat fmtClock = DateFormat('EEEE, dd-MMM-yyyy HH:mm:ss');
 
 /// Formats an amount stored in paise, e.g. 12345 -> "123.45".
 ///

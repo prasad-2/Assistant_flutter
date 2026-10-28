@@ -77,7 +77,11 @@ class AccountDetailPage extends StatelessWidget {
           ListView(
             padding: const EdgeInsets.all(12),
             children: [
-              AccountCard(summary: sum, hidden: s.hideBalances, showIndent: false),
+              AccountCard(
+                  summary: sum,
+                  hidden: s.isHidden(a.id!),
+                  onToggleHidden: () => s.toggleAccountHidden(a.id!),
+                  showIndent: false),
               const SizedBox(height: 6),
               Card(
                 child: Column(children: [
@@ -87,7 +91,7 @@ class AccountDetailPage extends StatelessWidget {
                       a.isCredit ? 'Credit account' : 'Normal account'),
                   if (a.isCredit) ...[
                     _row(Icons.speed, 'Credit limit',
-                        formatInr(a.creditLimit, hidden: s.hideBalances)),
+                        formatInr(a.creditLimit, hidden: s.isHidden(a.id!))),
                     // total spend = credit limit - ACTUAL value (scheduled ignored)
                     _row(
                         Icons.shopping_bag_outlined,
@@ -96,7 +100,7 @@ class AccountDetailPage extends StatelessWidget {
                             a.creditLimit > sum.actual
                                 ? a.creditLimit - sum.actual
                                 : 0,
-                            hidden: s.hideBalances)),
+                            hidden: s.isHidden(a.id!))),
                   ],
                   _row(Icons.account_tree, 'Parent account',
                       a.parentId == null ? 'None (top level)' : (sum.parentName ?? '-')),

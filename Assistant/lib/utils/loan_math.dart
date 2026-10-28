@@ -48,6 +48,42 @@ int calcEmi(int principal, double annualPct, int n, int freqValue, String freqUn
   return (principal * r * f / (f - 1)).round();
 }
 
+/// Reverse EMI calculation: finds the ANNUAL interest % for which [n] EMIs of
+/// [emi] repay [principal]. Solves  emi = P·r / (1 − (1+r)^−n)  for r by
+/// bisection (the right side grows with r), then scales r to a yearly rate.
+/// Returns null when the EMI is too small to repay the loan.
+double? solveAnnualRate({
+  required int principal,
+  required int emi,
+  required int n,
+  required int freqValue,
+  required String freqUnit,
+}) {
+  if (principal <= 0 || n <= 0 || emi <= 0) return null;
+  // all EMIs together must at least cover the principal (1 paise rounding / EMI)
+  if (emi * n < principal - n) return null;
+  final p = principal.toDouble();
+  double f(double r) => r == 0 ? p / n : p * r / (1 - math.pow(1 + r, -n));
+  final target = emi.toDouble();
+  if (target <= f(0)) return 0.0; // exactly principal / n  ->  0 % interest
+  var lo = 0.0;
+  var hi = 1.0;
+  var guard = 0;
+  while (f(hi) < target && guard++ < 200) {
+    hi *= 2;
+  }
+  for (var i = 0; i < 200; i++) {
+    final mid = (lo + hi) / 2;
+    if (f(mid) < target) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  final r = (lo + hi) / 2;
+  return r * 12 / unitToMonths(freqValue, freqUnit) * 100;
+}
+
 /// One generated instalment.
 class EmiRow {
   final int no;

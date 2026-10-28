@@ -15,7 +15,7 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
-  int _i = 0;
+  int _i = 0; // selected tab (0 = Home); the app still starts on Home
 
   @override
   Widget build(BuildContext context) {

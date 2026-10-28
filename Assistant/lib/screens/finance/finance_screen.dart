@@ -23,7 +23,7 @@ class FinanceScreen extends StatefulWidget {
 
 class _FinanceScreenState extends State<FinanceScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 4, vsync: this);
+  late final TabController _tab = TabController(length: 5, vsync: this);
   bool _reorder = false; // reorder (up / down) mode of the Accounts tab
 
   @override
@@ -164,7 +164,8 @@ class _FinanceScreenState extends State<FinanceScreen>
     final i = sibs.indexOf(x.account.id);
     return AccountCard(
       summary: x,
-      hidden: s.hideBalances,
+      hidden: s.isHidden(x.account.id!),
+      onToggleHidden: () => s.toggleAccountHidden(x.account.id!),
       expanded: !s.collapsedAccounts.contains(x.account.id),
       onToggleExpand: () => s.toggleCollapsed(x.account.id!),
       reorderMode: _reorder,
@@ -185,21 +186,38 @@ class _FinanceScreenState extends State<FinanceScreen>
     );
   }
 
-  /// Section title above a list of cards.
-  Widget _sectionHeader(String title, IconData icon, int count) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
-        child: Row(children: [
-          Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 8),
-          Text(title,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(width: 8),
-          Text('$count', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-        ]),
+  /// One account page: only bank accounts OR only credit accounts, so the two
+  /// kinds never share a scroll view.
+  Widget _accountList(AppState s, {required bool credit}) {
+    final rows = _sectionRows(s, credit);
+    if (rows.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+              credit
+                  ? 'No credit accounts yet.\nAdd an account and choose type "Credit account".'
+                  : 'No bank accounts yet.\nTap "Add" to create your first account.',
+              textAlign: TextAlign.center),
+        ),
       );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
+      children: [
+        if (_reorder)
+          Card(
+            color: Theme.of(context).colorScheme.secondaryContainer,
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text(
+                  'Reorder mode: use the arrows to move a card up or down among its siblings. The order is saved automatically. Tap the tick when done.'),
+            ),
+          ),
+        for (final x in rows) _card(s, x),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -208,7 +226,7 @@ class _FinanceScreenState extends State<FinanceScreen>
       appBar: AppBar(
         title: const Text('Finance'),
         actions: [
-          if (_tab.index == 0)
+          if (_tab.index <= 1) // Accounts and Credit tabs
             IconButton(
               tooltip: _reorder ? 'Done reordering' : 'Reorder accounts',
               icon: Icon(_reorder ? Icons.check : Icons.swap_vert),
@@ -222,6 +240,7 @@ class _FinanceScreenState extends State<FinanceScreen>
         ],
         bottom: TabBar(controller: _tab, isScrollable: true, tabAlignment: TabAlignment.start, tabs: const [
           Tab(text: 'Accounts'),
+          Tab(text: 'Credit'),
           Tab(text: 'Transactions'),
           Tab(text: 'Loans'),
           Tab(text: 'Debts'),
@@ -232,14 +251,14 @@ class _FinanceScreenState extends State<FinanceScreen>
         listenable: _tab,
         builder: (context, _) {
           switch (_tab.index) {
-            case 2:
+            case 3:
               return FloatingActionButton.extended(
                 icon: const Icon(Icons.add),
                 label: const Text('Add loan'),
                 onPressed: () => Navigator.push(context,
                     MaterialPageRoute(builder: (_) => const LoanFormPage())),
               );
-            case 3:
+            case 4:
               return FloatingActionButton.extended(
                 icon: const Icon(Icons.add),
                 label: const Text('Add'),
@@ -255,43 +274,10 @@ class _FinanceScreenState extends State<FinanceScreen>
         },
       ),
       body: TabBarView(controller: _tab, children: [
-        // ── Accounts tab ──
-        s.summaries.isEmpty
-            ? const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text(
-                      'No bank accounts yet.\nTap "Add" to create your first account.',
-                      textAlign: TextAlign.center),
-                ),
-              )
-            : Builder(builder: (context) {
-                final bank = _sectionRows(s, false);
-                final credit = _sectionRows(s, true);
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 90),
-                  children: [
-                    if (_reorder)
-                      Card(
-                        color: Theme.of(context).colorScheme.secondaryContainer,
-                        child: const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Text(
-                              'Reorder mode: use the arrows to move a card up or down among its siblings. The order is saved automatically. Tap the tick when done.'),
-                        ),
-                      ),
-                    // bank accounts and credit accounts are separate lists
-                    if (bank.isNotEmpty) ...[
-                      _sectionHeader('Bank accounts', Icons.account_balance, bank.length),
-                      for (final x in bank) _card(s, x),
-                    ],
-                    if (credit.isNotEmpty) ...[
-                      _sectionHeader('Credit accounts', Icons.credit_card, credit.length),
-                      for (final x in credit) _card(s, x),
-                    ],
-                  ],
-                );
-              }),
+        // ── Accounts tab (normal bank accounts) ──
+        _accountList(s, credit: false),
+        // ── Credit tab (credit accounts, separate page / scroll) ──
+        _accountList(s, credit: true),
         // ── Transactions tab ──
         const TransactionsView(),
         // ── Loans tab ──

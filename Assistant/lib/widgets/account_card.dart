@@ -34,6 +34,9 @@ class AccountCard extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onToggleExpand;
 
+  /// Individual show/hide button (eye) in the header; hidden when null.
+  final VoidCallback? onToggleHidden;
+
   /// Reorder mode: up / down arrows replace the menu. A null callback means
   /// "cannot move further in that direction" (arrow is disabled).
   final bool reorderMode;
@@ -52,6 +55,7 @@ class AccountCard extends StatelessWidget {
     this.onToggleRegular,
     this.expanded = true,
     this.onToggleExpand,
+    this.onToggleHidden,
     this.reorderMode = false,
     this.onMoveUp,
     this.onMoveDown,
@@ -137,6 +141,17 @@ class AccountCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 4),
               child: Icon(Icons.star_rounded, size: 18, color: fg),
+            ),
+          // eye: show / hide the values of THIS card only
+          if (onToggleHidden != null && !reorderMode)
+            IconButton(
+              tooltip: hidden ? 'Show values' : 'Hide values',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+              icon: Icon(hidden ? Icons.visibility_off : Icons.visibility,
+                  color: fg, size: 20),
+              onPressed: onToggleHidden,
             ),
           // expand / collapse the child accounts (nested)
           if (canToggle)

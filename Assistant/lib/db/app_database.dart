@@ -429,25 +429,14 @@ class AppDatabase {
     return out;
   }
 
-  /// Available balance of every account (accountId -> paise). Taken BEFORE a
-  /// change so [_validate] can tell whether the change made things worse.
-  Future<Map<int, int>> _availableMap(DatabaseExecutor e) async {
-    final accs = await _accounts(e);
-    final led = await _ledgers(e);
-    return {
-      for (final a in accs) a.id!: availableOf(a, led[a.id] ?? Ledger())
-    };
-  }
-
   /// Re-checks every account after a change. Throws [ValidationException]
-  /// (which rolls the whole DB transaction back) when:
-  ///  * an ACTUAL balance would be negative / a credit limit exceeded, always;
-  ///  * an AVAILABLE balance would be negative AND the change lowered it.
-  ///    Scheduled transactions are allowed to push the available balance
-  ///    below zero: pass [skipAvailable] = true for such changes. Already
-  ///    negative balances do not block unrelated changes.
-  Future<void> _validate(DatabaseExecutor e,
-      {Map<int, int>? before, bool skipAvailable = false}) async {
+  /// (which rolls the whole DB transaction back) only when an ACTUAL balance
+  /// would become negative / a credit limit would be exceeded.
+  ///
+  /// The AVAILABLE balance is deliberately NOT validated: scheduled
+  /// (blocked) amounts may push it below zero and actual transactions are
+  /// still allowed in that situation.
+  Future<void> _validate(DatabaseExecutor e) async {
     final accs = await _accounts(e);
     final led = await _ledgers(e);
     for (final a in accs) {
@@ -457,13 +446,6 @@ class AppDatabase {
         throw ValidationException(a.isCredit
             ? 'Insufficient balance: this would exceed the credit limit of "${a.name}".'
             : 'Insufficient balance in "${a.name}": the actual balance would become negative.');
-      }
-      if (skipAvailable) continue;
-      final avail = availableOf(a, l);
-      final worse = before == null || avail < (before[a.id] ?? avail);
-      if (avail < 0 && worse) {
-        throw ValidationException(
-            'Insufficient available balance in "${a.name}": funds blocked by scheduled transactions are needed for this.');
       }
     }
   }
@@ -533,7 +515,6 @@ class AppDatabase {
           cur = r.isEmpty ? null : r.first['parent_id'] as int?;
         }
       }
-      final before = await _availableMap(t);
       // next free position among the siblings of the (new) parent
       Future<int> nextOrder() async {
         final r = await t.rawQuery(
@@ -561,7 +542,7 @@ class AppDatabase {
         id = a.id!;
       }
       // e.g. switching to a smaller credit limit may break balances
-      await _validate(t, before: before);
+      await _validate(t);
       return id;
     });
   }
@@ -607,7 +588,6 @@ class AppDatabase {
   Future<void> deleteAccount(int id) async {
     final d = await db;
     await d.transaction((t) async {
-      final before = await _availableMap(t);
       final kids = Sqflite.firstIntValue(await t.rawQuery(
               'SELECT COUNT(*) FROM accounts WHERE parent_id=?', [id])) ??
           0;
@@ -626,7 +606,7 @@ class AppDatabase {
       await _unlinkTxns(t, 'account_id=?', [id]);
       await t.delete('transactions', where: 'account_id=?', whereArgs: [id]);
       await t.delete('accounts', where: 'id=?', whereArgs: [id]);
-      await _validate(t, before: before);
+      await _validate(t);
     });
   }
 
@@ -656,7 +636,6 @@ class AppDatabase {
   /// credit and deduct, the sign of all transactions of that category flips
   /// too (their balance impact changes), then balances are re-validated.
   Future<void> _applyCategory(DatabaseExecutor t, Category nc) async {
-    final before = await _availableMap(t);
     final old = await _category(t, nc.id!);
     if (old.isSystem) {
       throw ValidationException(
@@ -679,7 +658,7 @@ class AppDatabase {
           'UPDATE transactions SET amount=-amount, sched_amount=-sched_amount, updated_at=? WHERE category_id=?',
           [DateTime.now().millisecondsSinceEpoch, nc.id]);
     }
-    await _validate(t, before: before);
+    await _validate(t);
   }
 
   /// Dry run of a category edit. Returns an error message when saving would
@@ -863,7 +842,6 @@ class AppDatabase {
       final cat = await _category(t, i.categoryId);
       _checkInput(i, cat);
       if (cat.isRepayment) await _checkRepayment(t, i);
-      final before = await _availableMap(t);
       final now = DateTime.now().millisecondsSinceEpoch;
       final sched = i.status == 'scheduled';
 
@@ -893,8 +871,7 @@ class AppDatabase {
         final amt = cat.isCredit ? i.amountPaise : -i.amountPaise;
         firstId = await t.insert('transactions', row(i.accountId, amt, null));
       }
-      // scheduled entries may push the AVAILABLE balance below zero
-      await _validate(t, before: before, skipAvailable: sched);
+      await _validate(t);
       return firstId;
     });
   }
@@ -925,7 +902,6 @@ class AppDatabase {
       final becameActual = wasSched && i.status == 'actual';
       final stillSched = i.status == 'scheduled';
       if (cat.isRepayment) await _checkRepayment(t, i);
-      final before = await _availableMap(t);
       final now = DateTime.now().millisecondsSinceEpoch;
 
       Map<String, Object?> vals(int acc, int amt) => {
@@ -962,9 +938,7 @@ class AppDatabase {
         await t.update('transactions', vals(i.accountId, amt),
             where: 'id=?', whereArgs: [id]);
       }
-      // editing a purely scheduled entry may push AVAILABLE below zero
-      await _validate(t,
-          before: before, skipAvailable: wasSched && stillSched);
+      await _validate(t);
     });
   }
 
@@ -975,8 +949,6 @@ class AppDatabase {
       final rows = await t.query('transactions', where: 'id=?', whereArgs: [id]);
       if (rows.isEmpty) return;
       final group = rows.first['transfer_group'] as String?;
-      final wasScheduled = rows.first['status'] == 'scheduled';
-      final before = await _availableMap(t);
       await _unlinkTxns(t, group != null ? 'transfer_group=?' : 'id=?',
           [group ?? id]);
       if (group != null) {
@@ -985,7 +957,7 @@ class AppDatabase {
       } else {
         await t.delete('transactions', where: 'id=?', whereArgs: [id]);
       }
-      await _validate(t, before: before, skipAvailable: wasScheduled);
+      await _validate(t);
     });
   }
 

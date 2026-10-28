@@ -74,6 +74,17 @@ class LoanRepository {
   Future<void> setEmiAmount(int loanId, int paise) async => (await _db)
       .update('loans', {'emi_amount': paise}, where: 'id=?', whereArgs: [loanId]);
 
+  /// Saves an EMI amount together with the (reverse calculated) annual
+  /// interest %. Existing EMI entries are not touched.
+  Future<void> saveEmiAndRate(int loanId, int emi, double annualRate) async {
+    if (emi <= 0) throw ValidationException('EMI amount must be above 0.');
+    if (annualRate < 0 || annualRate > 100) {
+      throw ValidationException('The resulting interest must be between 0 and 100 %.');
+    }
+    await (await _db).update('loans', {'emi_amount': emi, 'rate': annualRate},
+        where: 'id=?', whereArgs: [loanId]);
+  }
+
   /// Replaces ALL EMI entries of the loan with a freshly generated schedule
   /// (tenure, frequency, start date, rate and the saved EMI amount).
   Future<void> generateSchedule(Loan loan) async {

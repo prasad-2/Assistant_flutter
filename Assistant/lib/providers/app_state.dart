@@ -23,6 +23,11 @@ class AppState extends ChangeNotifier {
     seedLight = prefs.getInt('seed_light') ?? kDefaultSeed;
     seedDark = prefs.getInt('seed_dark'); // null = same colour as light mode
     bgOpacity = prefs.getDouble('bg_opacity') ?? 0.35;
+    // per-account show/hide choices are stored as "id:1" (hidden) / "id:0" (shown)
+    for (final e in prefs.getStringList('acc_hide') ?? <String>[]) {
+      final p = e.split(':');
+      if (p.length == 2) accountHide[int.parse(p[0])] = p[1] == '1';
+    }
     collapsedAccounts = (prefs.getStringList('collapsed_accounts') ?? [])
         .map(int.parse)
         .toSet();
@@ -46,6 +51,37 @@ class AppState extends ChangeNotifier {
   int? seedDark; // separate colour for dark mode, null = use seedLight
   Uint8List? bgBytes; // background image (PNG) or null
   double bgOpacity = 0.35; // 0.1 .. 1.0 visibility of the image
+
+  /// Individual eye-button choices: account id -> hidden (true) / shown (false).
+  /// Accounts without an entry follow the global [hideBalances] switch.
+  final Map<int, bool> accountHide = {};
+
+  /// Are the values of this account hidden right now?
+  bool isHidden(int accountId) => accountHide[accountId] ?? hideBalances;
+
+  /// Eye button on a card: flips only this account.
+  Future<void> toggleAccountHidden(int accountId) async {
+    accountHide[accountId] = !isHidden(accountId);
+    await _saveAccountHide();
+    notifyListeners();
+  }
+
+  Future<void> _saveAccountHide() => prefs.setStringList('acc_hide',
+      accountHide.entries.map((e) => '${e.key}:${e.value ? 1 : 0}').toList());
+
+  /// Sum of the AVAILABLE balances of all regular accounts.
+  int get regularAvailable => summaries
+      .where((x) => x.account.isRegular)
+      .fold<int>(0, (s, x) => s + x.available);
+
+  /// Days left in the current month INCLUDING today (28-Oct -> 4 days).
+  int get daysLeftInMonth {
+    final n = DateTime.now();
+    return DateTime(n.year, n.month + 1, 0).day - n.day + 1;
+  }
+
+  /// Daily limit = regular accounts' available balance / days left this month.
+  int get dailyLimit => (regularAvailable / daysLeftInMonth).round();
 
   /// Ids of parent accounts whose child accounts are collapsed (Finance tab).
   Set<int> collapsedAccounts = {};
@@ -154,6 +190,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> toggleHide() async {
     hideBalances = !hideBalances;
+    // the global switch is the master: it clears the individual choices
+    accountHide.clear();
+    await _saveAccountHide();
     await prefs.setBool('hide_balances', hideBalances);
     notifyListeners();
     WidgetBridge.refresh(); // widget masks amounts when balances are hidden

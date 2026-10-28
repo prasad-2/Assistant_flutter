@@ -38,39 +38,88 @@ class LoanDetailPage extends StatelessWidget {
     }
   }
 
-  /// EMI calculator dialog: shows EMI, total interest and total payable, and
-  /// can store the EMI amount used for schedule generation.
+  /// EMI calculator dialog. Shows the calculated EMI, which the user may EDIT:
+  /// the interest % is then calculated in reverse (so that these EMIs repay
+  /// the loan) and both the EMI and the interest are saved.
   Future<void> _calculateEmi(BuildContext context, LoanSummary s) async {
     final l = s.loan;
     final n = l.installments;
-    final emi = calcEmi(l.principal, l.rate, n, l.freqValue, l.freqUnit);
-    final total = emi * n;
-    final interest = total - l.principal;
+    final computed = calcEmi(l.principal, l.rate, n, l.freqValue, l.freqUnit);
+    final emiC = TextEditingController(text: paiseToInput(computed));
+    int? saveEmi;
+    double? saveRate;
+
     final save = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.calculate),
-        title: const Text('EMI calculation'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          _kv('Loan value', formatInr(l.principal)),
-          _kv('Interest', '${l.rate}% per year'),
-          _kv('Instalments', '$n  (${l.frequencyText.toLowerCase()})'),
-          const Divider(),
-          _kv('EMI amount', formatInr(emi), bold: true),
-          _kv('Total interest', formatInr(interest < 0 ? 0 : interest)),
-          _kv('Total payable', formatInr(total)),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Close')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Use as EMI amount')),
-        ],
-      ),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        final emi = parsePaise(emiC.text) ?? 0;
+        final edited = emi != computed;
+        // untouched EMI keeps the entered rate; an edited EMI recalculates it
+        final rate = edited
+            ? solveAnnualRate(
+                principal: l.principal,
+                emi: emi,
+                n: n,
+                freqValue: l.freqValue,
+                freqUnit: l.freqUnit)
+            : l.rate;
+        final rounded = rate == null ? null : double.parse(rate.toStringAsFixed(2));
+        final valid = emi > 0 && rounded != null && rounded <= 100;
+        final total = emi * n;
+        final interest = total - l.principal;
+        return AlertDialog(
+          icon: const Icon(Icons.calculate),
+          title: const Text('EMI calculation'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              _kv('Loan value', formatInr(l.principal)),
+              _kv('Instalments', '$n  (${l.frequencyText.toLowerCase()})'),
+              const SizedBox(height: 10),
+              AmountField(
+                controller: emiC,
+                label: 'EMI amount (you can edit it)',
+                onChanged: (_) => setS(() {}),
+              ),
+              const SizedBox(height: 10),
+              _kv(
+                  edited ? 'Interest (recalculated)' : 'Interest',
+                  rounded == null
+                      ? 'EMI too low to repay the loan'
+                      : '${rounded.toStringAsFixed(2)}% per year',
+                  bold: true),
+              if (edited) _kv('Entered interest', '${l.rate}% per year'),
+              _kv('Total interest', valid ? formatInr(interest < 0 ? 0 : interest) : '-'),
+              _kv('Total payable', valid ? formatInr(total) : '-'),
+              if (s.hasSchedule)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                      'Existing EMI entries are not changed. Use "Regenerate schedule" to apply the new values.',
+                      style: Theme.of(ctx).textTheme.bodySmall),
+                ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Close')),
+            FilledButton(
+                onPressed: valid
+                    ? () {
+                        saveEmi = emi;
+                        saveRate = edited ? rounded : l.rate;
+                        Navigator.pop(ctx, true);
+                      }
+                    : null,
+                child: Text(edited ? 'Save EMI & interest' : 'Use as EMI amount')),
+          ],
+        );
+      }),
     );
-    if (save == true && context.mounted) {
-      await _run(context, () => _repo.setEmiAmount(l.id!, emi),
-          done: 'EMI amount saved');
+    if (save == true && context.mounted && saveEmi != null) {
+      await _run(context,
+          () => _repo.saveEmiAndRate(l.id!, saveEmi!, saveRate!),
+          done: 'EMI amount and interest saved');
     }
   }
 
