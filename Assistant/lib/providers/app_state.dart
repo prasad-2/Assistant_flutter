@@ -6,6 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
+import '../db/debt_repository.dart';
+import '../db/loan_repository.dart';
+import '../models/debt_models.dart';
+import '../models/loan_models.dart';
 import '../models/models.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
@@ -15,6 +19,7 @@ class AppState extends ChangeNotifier {
   AppState(this.prefs) : auth = AuthService(prefs) {
     themeMode = ThemeMode.values[(prefs.getInt('theme') ?? 0).clamp(0, 2)];
     hideBalances = prefs.getBool('hide_balances') ?? false;
+    hideInRecents = prefs.getBool('hide_in_recents') ?? true;
     seedLight = prefs.getInt('seed_light') ?? kDefaultSeed;
     seedDark = prefs.getInt('seed_dark'); // null = same colour as light mode
     bgOpacity = prefs.getDouble('bg_opacity') ?? 0.35;
@@ -32,6 +37,9 @@ class AppState extends ChangeNotifier {
 
   ThemeMode themeMode = ThemeMode.system;
   bool hideBalances = false;
+
+  /// Hide the app in the recent-apps list + block screenshots (default on).
+  bool hideInRecents = true;
 
   // ── appearance ──
   int seedLight = kDefaultSeed; // theme colour for light mode (ARGB)
@@ -57,6 +65,8 @@ class AppState extends ChangeNotifier {
   List<AccountSummary> summaries = []; // accounts with balances (tree order)
   List<Account> accounts = []; // plain accounts (for dropdowns)
   List<Category> categories = [];
+  List<LoanSummary> loans = []; // loan management
+  List<DebtPerson> people = []; // debt management
   List<Todo> todos = [];
   List<TodoGroup> groups = [];
 
@@ -85,6 +95,8 @@ class AppState extends ChangeNotifier {
     summaries = await _db.getSummaries();
     accounts = await _db.getAccounts();
     categories = await _db.getCategories();
+    loans = await LoanRepository.instance.summaries();
+    people = await DebtRepository.instance.people();
     financeVersion++;
     if (notify) notifyListeners();
     WidgetBridge.refresh(); // home-screen widget shows recent transactions
@@ -129,6 +141,14 @@ class AppState extends ChangeNotifier {
   Future<void> setBgOpacity(double v) async {
     bgOpacity = v.clamp(0.1, 1.0);
     await prefs.setDouble('bg_opacity', bgOpacity);
+    notifyListeners();
+  }
+
+  /// Saves the privacy option and applies it to the window immediately.
+  Future<void> setHideInRecents(bool v) async {
+    hideInRecents = v;
+    await prefs.setBool('hide_in_recents', v);
+    WidgetBridge.setSecure(v);
     notifyListeners();
   }
 

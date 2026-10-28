@@ -2,14 +2,19 @@
 // "Use value" copies the result into the form's value field.
 import 'package:flutter/material.dart';
 
-/// Recursive-descent evaluator for + − × ÷ and parentheses.
+/// Recursive-descent evaluator for + − × ÷, parentheses and percentages.
 ///   expr   := term (('+'|'−') term)*
 ///   term   := factor (('×'|'÷') factor)*
-///   factor := '−' factor | '(' expr ')' | number
+///   factor := ('−' factor | '(' expr ')' | number) '%'*
+///
+/// Percent examples:  500×10% = 50   500+10% = 550   500−10% = 450   10% = 0.1
 class _Parser {
   final String s;
   int i = 0;
   _Parser(this.s);
+
+  bool _factorHadPercent = false; // last parsed factor ended with %
+  bool _termIsPercent = false; // last parsed term was just "<number>%"
 
   double parse() {
     final v = _expr();
@@ -21,7 +26,9 @@ class _Parser {
     var v = _term();
     while (i < s.length && (s[i] == '+' || s[i] == '−')) {
       final op = s[i++];
-      final r = _term();
+      var r = _term();
+      // "500 + 10%" means 500 + (10% of 500)
+      if (_termIsPercent) r = v * r;
       v = op == '+' ? v + r : v - r;
     }
     return v;
@@ -29,7 +36,9 @@ class _Parser {
 
   double _term() {
     var v = _factor();
+    var onlyPercent = _factorHadPercent;
     while (i < s.length && (s[i] == '×' || s[i] == '÷')) {
+      onlyPercent = false;
       final op = s[i++];
       final r = _factor();
       if (op == '÷') {
@@ -39,10 +48,23 @@ class _Parser {
         v *= r;
       }
     }
+    _termIsPercent = onlyPercent;
     return v;
   }
 
   double _factor() {
+    var v = _primary();
+    var pct = false;
+    while (i < s.length && s[i] == '%') {
+      i++;
+      v /= 100;
+      pct = true;
+    }
+    _factorHadPercent = pct;
+    return v;
+  }
+
+  double _primary() {
     if (i < s.length && s[i] == '−') {
       i++;
       return -_factor();
@@ -140,9 +162,12 @@ class _CalculatorPanelState extends State<CalculatorPanel> {
         } else if (_expr[_expr.length - 1] != '(' || k == '−') {
           _expr += k;
         }
+      } else if (k == '%') {
+        // percent may follow a number, a closing bracket or another %
+        if (_expr.isNotEmpty && RegExp(r'[0-9)%]$').hasMatch(_expr)) _expr += k;
       } else if (k == '.') {
         // only one dot per number
-        final lastNum = _expr.split(RegExp(r'[+−×÷()]')).last;
+        final lastNum = _expr.split(RegExp(r'[+−×÷()%]')).last;
         if (!lastNum.contains('.')) _expr += lastNum.isEmpty ? '0.' : '.';
       } else {
         _expr += k; // digit or parenthesis
@@ -234,7 +259,7 @@ class _CalculatorPanelState extends State<CalculatorPanel> {
               ]),
             ),
             const SizedBox(height: 8),
-            row([btn('C', bg: cs.errorContainer, fg: cs.onErrorContainer), btn('('), btn(')'), btn('⌫', bg: opBg, fg: opFg)]),
+            row([btn('C', bg: cs.errorContainer, fg: cs.onErrorContainer), btn('('), btn(')'), btn('%', bg: opBg, fg: opFg), btn('⌫', bg: opBg, fg: opFg)]),
             row([btn('7'), btn('8'), btn('9'), btn('÷', bg: opBg, fg: opFg)]),
             row([btn('4'), btn('5'), btn('6'), btn('×', bg: opBg, fg: opFg)]),
             row([btn('1'), btn('2'), btn('3'), btn('−', bg: opBg, fg: opFg)]),
@@ -255,4 +280,29 @@ class _CalculatorPanelState extends State<CalculatorPanel> {
       ),
     );
   }
+}
+
+/// Opens the calculator as a panel sliding down from the top of the screen
+/// (any screen). Returns the value the user chose with "Use value", or null.
+Future<double?> showCalculatorDialog(BuildContext context, {String initial = ''}) {
+  return showGeneralDialog<double>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Calculator',
+    barrierColor: Colors.black45,
+    transitionDuration: const Duration(milliseconds: 220),
+    pageBuilder: (ctx, _, __) => Align(
+      alignment: Alignment.topCenter,
+      child: CalculatorPanel(
+        initial: initial,
+        onUse: (v) => Navigator.pop(ctx, v),
+        onClose: () => Navigator.pop(ctx),
+      ),
+    ),
+    transitionBuilder: (ctx, anim, _, child) => SlideTransition(
+      position: Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero)
+          .animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+      child: child,
+    ),
+  );
 }

@@ -34,6 +34,12 @@ class AccountCard extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onToggleExpand;
 
+  /// Reorder mode: up / down arrows replace the menu. A null callback means
+  /// "cannot move further in that direction" (arrow is disabled).
+  final bool reorderMode;
+  final VoidCallback? onMoveUp;
+  final VoidCallback? onMoveDown;
+
   const AccountCard({
     super.key,
     required this.summary,
@@ -46,6 +52,9 @@ class AccountCard extends StatelessWidget {
     this.onToggleRegular,
     this.expanded = true,
     this.onToggleExpand,
+    this.reorderMode = false,
+    this.onMoveUp,
+    this.onMoveDown,
   });
 
   bool get _compact => size == AccountCardSize.compact;
@@ -95,8 +104,9 @@ class AccountCard extends StatelessWidget {
   /// Coloured top part: identity row + (owner | available balance) row.
   Widget _header(
       BuildContext context, Account a, Color top, Color bottom, Color fg) {
-    final hasMenu = onEdit != null;
-    final canToggle = summary.hasChildren && onToggleExpand != null;
+    final hasMenu = onEdit != null && !reorderMode;
+    final canToggle =
+        summary.hasChildren && onToggleExpand != null && !reorderMode;
 
     return Container(
       padding: EdgeInsets.fromLTRB(_compact ? 10 : 12, _compact ? 6 : 8,
@@ -139,6 +149,25 @@ class AccountCard extends StatelessWidget {
                   color: fg, size: 24),
               onPressed: onToggleExpand,
             ),
+          // reorder mode: move the card up / down (saved automatically)
+          if (reorderMode) ...[
+            IconButton(
+              tooltip: 'Move up',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+              icon: Icon(Icons.arrow_upward, color: fg.withValues(alpha: onMoveUp == null ? .3 : 1)),
+              onPressed: onMoveUp,
+            ),
+            IconButton(
+              tooltip: 'Move down',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+              icon: Icon(Icons.arrow_downward, color: fg.withValues(alpha: onMoveDown == null ? .3 : 1)),
+              onPressed: onMoveDown,
+            ),
+          ],
           if (hasMenu)
             PopupMenuButton<String>(
               iconColor: fg,
@@ -205,13 +234,13 @@ class AccountCard extends StatelessWidget {
                                   formatInr(summary.available, hidden: hidden),
                                   style: TextStyle(
                                       color: Colors.red.shade700,
-                                      fontWeight: FontWeight.w800,
+                                      fontWeight: FontWeight.w500,
                                       fontSize: _compact ? 17 : 22)),
                             )
                           : Text(formatInr(summary.available, hidden: hidden),
                               style: TextStyle(
                                   color: fg,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.w500,
                                   fontSize: _compact ? 17 : 22)),
                     ),
                   ],
@@ -224,23 +253,16 @@ class AccountCard extends StatelessWidget {
     );
   }
 
-  /// Bottom strip: Actual, Scheduled and (credit accounts) limit + total spend.
+  /// Bottom strip: Actual, Scheduled IN, Scheduled OUT and (credit accounts)
+  /// credit limit + total spend.
   Widget _metrics(BuildContext context, Account a) {
-    final sched = summary.scheduledNet;
+    // Scheduled money is shown separately: coming in (green) / going out (red).
+    final inn = summary.scheduledIn;
+    final out = summary.scheduledOut;
 
-    // Scheduled amount: direction shown by arrow + colour (no +/- prefix).
-    IconData? schedIcon;
-    Color? schedColor;
-    if (!hidden && sched > 0) {
-      schedIcon = Icons.south_west; // money coming in
-      schedColor = creditColor(context);
-    } else if (!hidden && sched < 0) {
-      schedIcon = Icons.north_east; // money going out
-      schedColor = debitColor(context);
-    }
-
-    // credit account: total spend = credit limit - available balance
-    final totalSpend = math.max(0, a.creditLimit - summary.available);
+    // credit account: total spend = credit limit - ACTUAL value
+    // (scheduled entries are deliberately ignored here)
+    final totalSpend = math.max(0, a.creditLimit - summary.actual);
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -250,8 +272,14 @@ class AccountCard extends StatelessWidget {
         return Wrap(spacing: 18, runSpacing: _compact ? 4 : 6, children: [
           _metric(context, 'Actual', formatInr(summary.actual, hidden: hidden),
               maxW: maxW),
-          _metric(context, 'Scheduled', formatInr(sched.abs(), hidden: hidden),
-              maxW: maxW, color: schedColor, icon: schedIcon),
+          _metric(context, 'Scheduled in', formatInr(inn, hidden: hidden),
+              maxW: maxW,
+              color: (!hidden && inn > 0) ? creditColor(context) : null,
+              icon: (!hidden && inn > 0) ? Icons.south_west : null),
+          _metric(context, 'Scheduled out', formatInr(out, hidden: hidden),
+              maxW: maxW,
+              color: (!hidden && out > 0) ? debitColor(context) : null,
+              icon: (!hidden && out > 0) ? Icons.north_east : null),
           if (a.isCredit) ...[
             _metric(context, 'Credit limit',
                 formatInr(a.creditLimit, hidden: hidden),

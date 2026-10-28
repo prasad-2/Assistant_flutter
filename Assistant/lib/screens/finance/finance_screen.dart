@@ -2,12 +2,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../db/app_database.dart';
 import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../../widgets/account_card.dart';
 import '../../widgets/common.dart';
 import 'account_actions.dart';
 import 'account_detail.dart';
+import 'debts_view.dart';
+import 'loan_form.dart';
+import 'loans_view.dart';
 import 'transaction_form.dart';
 import 'transactions_view.dart';
 
@@ -19,7 +23,17 @@ class FinanceScreen extends StatefulWidget {
 
 class _FinanceScreenState extends State<FinanceScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 2, vsync: this);
+  late final TabController _tab = TabController(length: 4, vsync: this);
+  bool _reorder = false; // reorder (up / down) mode of the Accounts tab
+
+  @override
+  void initState() {
+    super.initState();
+    // rebuild when the tab changes (the reorder button is Accounts-tab only)
+    _tab.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   void dispose() {
@@ -59,24 +73,133 @@ class _FinanceScreenState extends State<FinanceScreen>
     );
   }
 
-  /// Accounts that are currently visible. The list is in tree order, so when
-  /// an account is collapsed every following entry that is deeper than it
-  /// (its whole nested subtree) is skipped until the next sibling/ancestor.
-  List<AccountSummary> _visible(AppState s) {
-    final out = <AccountSummary>[];
-    int? hideBelowDepth;
-    for (final x in s.summaries) {
-      if (hideBelowDepth != null) {
-        if (x.depth > hideBelowDepth) continue; // inside a collapsed subtree
-        hideBelowDepth = null;
-      }
-      out.add(x);
-      if (x.hasChildren && s.collapsedAccounts.contains(x.account.id)) {
-        hideBelowDepth = x.depth;
-      }
-    }
-    return out;
+  /// "Add" menu of the Debts tab: a new person or a new entry.
+  void _showDebtMenu() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.person_add_alt),
+            title: const Text('Add person'),
+            onTap: () {
+              Navigator.pop(ctx);
+              DebtActions.addPerson(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.swap_vert),
+            title: const Text('Add debt entry (I lent / I borrowed)'),
+            onTap: () {
+              Navigator.pop(ctx);
+              DebtActions.addEntry(context);
+            },
+          ),
+        ]),
+      ),
+    );
   }
+
+  /// Rows of ONE section ("Bank accounts" or "Credit accounts").
+  ///
+  /// The global list is in tree order. For a section we keep only accounts of
+  /// that type, compute the indentation from ancestors that are in the SAME
+  /// section (an account whose parent is in the other section starts a new
+  /// root) and hide accounts below a collapsed same-section ancestor.
+  List<AccountSummary> _sectionRows(AppState s, bool credit) {
+    final byId = {for (final x in s.summaries) x.account.id!: x};
+    final inSection = [for (final x in s.summaries) if (x.account.isCredit == credit) x];
+    final parentsWithKids = {
+      for (final x in inSection)
+        if (x.account.parentId != null &&
+            (byId[x.account.parentId]?.account.isCredit == credit))
+          x.account.parentId!
+    };
+    final rows = <AccountSummary>[];
+    for (final x in inSection) {
+      var depth = 0;
+      var hidden = false;
+      var p = x.account.parentId;
+      var guard = 0;
+      while (p != null && guard++ < 100) {
+        final pa = byId[p];
+        if (pa == null) break;
+        if (pa.account.isCredit == credit) {
+          depth++;
+          if (s.collapsedAccounts.contains(pa.account.id)) hidden = true;
+        }
+        p = pa.account.parentId;
+      }
+      if (hidden) continue;
+      // same data, but with the section based depth / children flag
+      rows.add(AccountSummary(
+        account: x.account,
+        depth: depth,
+        parentName: x.parentName,
+        hasChildren: parentsWithKids.contains(x.account.id),
+        actual: x.actual,
+        available: x.available,
+        scheduledIn: x.scheduledIn,
+        scheduledOut: x.scheduledOut,
+      ));
+    }
+    return rows;
+  }
+
+  /// Moves an account up / down among its siblings and saves the order.
+  Future<void> _move(AppState s, Account a, bool up) async {
+    await AppDatabase.instance.moveAccount(a.id!, up: up);
+    await s.refreshFinance();
+  }
+
+  /// One account card (normal mode or reorder mode).
+  Widget _card(AppState s, AccountSummary x) {
+    // siblings of the same type, in saved order -> which arrows are enabled
+    final sibs = [
+      for (final y in s.summaries)
+        if (y.account.parentId == x.account.parentId &&
+            y.account.isCredit == x.account.isCredit)
+          y.account.id
+    ];
+    final i = sibs.indexOf(x.account.id);
+    return AccountCard(
+      summary: x,
+      hidden: s.hideBalances,
+      expanded: !s.collapsedAccounts.contains(x.account.id),
+      onToggleExpand: () => s.toggleCollapsed(x.account.id!),
+      reorderMode: _reorder,
+      onMoveUp: i > 0 ? () => _move(s, x.account, true) : null,
+      onMoveDown: (i >= 0 && i < sibs.length - 1)
+          ? () => _move(s, x.account, false)
+          : null,
+      // tap -> bank details (notes) + its transactions
+      onTap: _reorder
+          ? null
+          : () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => AccountDetailPage(accountId: x.account.id!))),
+      onEdit: () => AccountActions.openForm(context, x.account),
+      onDelete: () => AccountActions.confirmAndDelete(context, x.account),
+      onToggleRegular: () => AccountActions.toggleRegular(context, x.account),
+    );
+  }
+
+  /// Section title above a list of cards.
+  Widget _sectionHeader(String title, IconData icon, int count) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+        child: Row(children: [
+          Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 8),
+          Text(title,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(width: 8),
+          Text('$count', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ]),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -85,21 +208,51 @@ class _FinanceScreenState extends State<FinanceScreen>
       appBar: AppBar(
         title: const Text('Finance'),
         actions: [
+          if (_tab.index == 0)
+            IconButton(
+              tooltip: _reorder ? 'Done reordering' : 'Reorder accounts',
+              icon: Icon(_reorder ? Icons.check : Icons.swap_vert),
+              onPressed: () => setState(() => _reorder = !_reorder),
+            ),
           IconButton(
             tooltip: s.hideBalances ? 'Show balances' : 'Hide balances',
             icon: Icon(s.hideBalances ? Icons.visibility_off : Icons.visibility),
             onPressed: s.toggleHide,
           ),
         ],
-        bottom: TabBar(controller: _tab, tabs: const [
+        bottom: TabBar(controller: _tab, isScrollable: true, tabAlignment: TabAlignment.start, tabs: const [
           Tab(text: 'Accounts'),
           Tab(text: 'Transactions'),
+          Tab(text: 'Loans'),
+          Tab(text: 'Debts'),
         ]),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.add),
-        label: const Text('Add'),
-        onPressed: () => _showAddMenu(s),
+      // the Add button depends on the visible tab
+      floatingActionButton: ListenableBuilder(
+        listenable: _tab,
+        builder: (context, _) {
+          switch (_tab.index) {
+            case 2:
+              return FloatingActionButton.extended(
+                icon: const Icon(Icons.add),
+                label: const Text('Add loan'),
+                onPressed: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const LoanFormPage())),
+              );
+            case 3:
+              return FloatingActionButton.extended(
+                icon: const Icon(Icons.add),
+                label: const Text('Add'),
+                onPressed: () => _showDebtMenu(),
+              );
+            default:
+              return FloatingActionButton.extended(
+                icon: const Icon(Icons.add),
+                label: const Text('Add'),
+                onPressed: () => _showAddMenu(s),
+              );
+          }
+        },
       ),
       body: TabBarView(controller: _tab, children: [
         // ── Accounts tab ──
@@ -112,31 +265,39 @@ class _FinanceScreenState extends State<FinanceScreen>
                       textAlign: TextAlign.center),
                 ),
               )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-                children: [
-                  for (final x in _visible(s))
-                    AccountCard(
-                      summary: x,
-                      hidden: s.hideBalances,
-                      expanded: !s.collapsedAccounts.contains(x.account.id),
-                      onToggleExpand: () => s.toggleCollapsed(x.account.id!),
-                      // tap -> bank details (notes) + its transactions
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) =>
-                                  AccountDetailPage(accountId: x.account.id!))),
-                      onEdit: () => AccountActions.openForm(context, x.account),
-                      onDelete: () =>
-                          AccountActions.confirmAndDelete(context, x.account),
-                      onToggleRegular: () =>
-                          AccountActions.toggleRegular(context, x.account),
-                    ),
-                ],
-              ),
+            : Builder(builder: (context) {
+                final bank = _sectionRows(s, false);
+                final credit = _sectionRows(s, true);
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 90),
+                  children: [
+                    if (_reorder)
+                      Card(
+                        color: Theme.of(context).colorScheme.secondaryContainer,
+                        child: const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Text(
+                              'Reorder mode: use the arrows to move a card up or down among its siblings. The order is saved automatically. Tap the tick when done.'),
+                        ),
+                      ),
+                    // bank accounts and credit accounts are separate lists
+                    if (bank.isNotEmpty) ...[
+                      _sectionHeader('Bank accounts', Icons.account_balance, bank.length),
+                      for (final x in bank) _card(s, x),
+                    ],
+                    if (credit.isNotEmpty) ...[
+                      _sectionHeader('Credit accounts', Icons.credit_card, credit.length),
+                      for (final x in credit) _card(s, x),
+                    ],
+                  ],
+                );
+              }),
         // ── Transactions tab ──
         const TransactionsView(),
+        // ── Loans tab ──
+        const LoansView(),
+        // ── Debts tab ──
+        const DebtsView(),
       ]),
     );
   }

@@ -13,6 +13,7 @@ import '../../utils/image_utils.dart';
 import '../../widgets/color_picker.dart';
 import '../../widgets/common.dart';
 import '../lock_screen.dart';
+import 'backup_schedule_screen.dart';
 import 'categories_screen.dart';
 import 'security_screen.dart';
 
@@ -218,7 +219,29 @@ class SettingsScreen extends StatelessWidget {
           onTap: () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => const SecurityScreen())),
         ),
+        SwitchListTile(
+          secondary: const Icon(Icons.visibility_off_outlined),
+          title: const Text('Hide app in recent apps'),
+          subtitle: const Text(
+              'The app screen is hidden in the recent-apps list and screenshots are blocked'),
+          value: s.hideInRecents,
+          onChanged: s.setHideInRecents,
+        ),
         const _Header('Backup & restore'),
+        ListTile(
+          leading: const Icon(Icons.schedule_send_outlined),
+          title: const Text('Scheduled backup'),
+          subtitle: const Text('Automatic backups: frequency, time and location'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () async {
+            // opening the schedule needs authentication when the lock is on
+            if (!await requireAuth(context, s.auth)) return;
+            if (context.mounted) {
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const BackupScheduleScreen()));
+            }
+          },
+        ),
         ListTile(
           leading: const Icon(Icons.backup_outlined),
           title: const Text('Take backup'),

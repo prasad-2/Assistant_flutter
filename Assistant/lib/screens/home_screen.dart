@@ -12,6 +12,7 @@ import '../models/models.dart';
 import '../providers/app_state.dart';
 import '../utils/format.dart';
 import '../widgets/account_card.dart';
+import 'category_chart_page.dart';
 import 'finance/account_detail.dart';
 import 'finance/transaction_form.dart';
 import 'finance/transactions_view.dart';
@@ -34,6 +35,12 @@ class HomeScreen extends StatelessWidget {
         title: const Text('Home'),
         actions: [
           IconButton(
+            tooltip: 'Charts',
+            icon: const Icon(Icons.pie_chart_outline),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CategoryChartPage())),
+          ),
+          IconButton(
             tooltip: s.hideBalances ? 'Show balances' : 'Hide balances',
             icon: Icon(s.hideBalances ? Icons.visibility_off : Icons.visibility),
             onPressed: s.toggleHide,
@@ -50,7 +57,7 @@ class HomeScreen extends StatelessWidget {
             Expanded(
               child: FilledButton.icon(
                 icon: const Icon(Icons.add),
-                label: const Text('Add transaction'),
+                label: const FittedBox(child: Text('Transaction')),
                 onPressed: () {
                   if (s.accounts.isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -62,17 +69,26 @@ class HomeScreen extends StatelessWidget {
                 },
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.schedule),
-                label: const Text('Scheduled'),
+                label: const FittedBox(child: Text('Scheduled')),
                 onPressed: () => Navigator.push(
                     context,
                     MaterialPageRoute(
                         builder: (_) => const TransactionsPage(
                             title: 'Scheduled transactions',
                             initial: TxnFilter(status: 'scheduled')))),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.pie_chart_outline),
+                label: const FittedBox(child: Text('Charts')),
+                onPressed: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const CategoryChartPage())),
               ),
             ),
           ]),

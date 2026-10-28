@@ -11,6 +11,7 @@ import '../../providers/app_state.dart';
 import '../../utils/format.dart';
 import '../../utils/icons.dart';
 import '../../widgets/account_avatar.dart';
+import '../../widgets/amount_field.dart';
 import '../../widgets/color_picker.dart';
 import '../../widgets/common.dart';
 import '../../widgets/form_widgets.dart';
@@ -233,18 +234,10 @@ class _AccountFormPageState extends State<AccountFormPage> {
                   onChanged: (v) => setState(() => _credit = v ?? false),
                 ),
                 if (_credit)
-                  TextFormField(
-                    controller: _limit,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                        labelText: 'Credit limit',
-                        prefixIcon: Icon(Icons.speed)),
-                    validator: (v) {
-                      final p = parsePaise(v ?? '');
-                      return (p == null || p <= 0) ? 'Enter a valid limit' : null;
-                    },
-                  ),
+                  AmountField(
+                      controller: _limit,
+                      label: 'Credit limit',
+                      icon: Icons.speed),
               ],
             ),
             FormSection(

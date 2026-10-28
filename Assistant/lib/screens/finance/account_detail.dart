@@ -88,13 +88,13 @@ class AccountDetailPage extends StatelessWidget {
                   if (a.isCredit) ...[
                     _row(Icons.speed, 'Credit limit',
                         formatInr(a.creditLimit, hidden: s.hideBalances)),
-                    // total spend = credit limit - available balance
+                    // total spend = credit limit - ACTUAL value (scheduled ignored)
                     _row(
                         Icons.shopping_bag_outlined,
                         'Total spend',
                         formatInr(
-                            a.creditLimit > sum.available
-                                ? a.creditLimit - sum.available
+                            a.creditLimit > sum.actual
+                                ? a.creditLimit - sum.actual
                                 : 0,
                             hidden: s.hideBalances)),
                   ],

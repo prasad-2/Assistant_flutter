@@ -29,6 +29,10 @@ class Account {
   final String iconKey; // `bank:<key>` | `icon:<key>`; see utils/icons.dart
   final Uint8List? iconBlob; // optional user-uploaded icon (PNG bytes)
 
+  /// Position among its siblings (same parent). Managed by the database via
+  /// the up / down reorder buttons; NOT written by the account form.
+  final int sortOrder;
+
   const Account({
     this.id,
     required this.name,
@@ -41,6 +45,7 @@ class Account {
     this.notes = '',
     this.iconKey = 'icon:bank',
     this.iconBlob,
+    this.sortOrder = 0,
   });
 
   factory Account.fromMap(Map<String, Object?> m) => Account(
@@ -55,6 +60,7 @@ class Account {
         notes: (m['notes'] as String?) ?? '',
         iconKey: (m['icon_key'] as String?) ?? 'icon:bank',
         iconBlob: m['icon_blob'] as Uint8List?,
+        sortOrder: (m['sort_order'] as int?) ?? 0,
       );
 
   Map<String, Object?> toMap() => {
@@ -123,8 +129,10 @@ class AccountSummary {
   /// Own ledger after blocking scheduled debits (the "funds block" concept).
   final int available;
 
-  /// Signed sum of scheduled transactions of this account only.
-  final int scheduledNet;
+  /// Total of scheduled money coming IN / going OUT (both positive numbers,
+  /// this account only). Shown separately on the card.
+  final int scheduledIn;
+  final int scheduledOut;
 
   const AccountSummary({
     required this.account,
@@ -133,7 +141,8 @@ class AccountSummary {
     required this.hasChildren,
     required this.actual,
     required this.available,
-    required this.scheduledNet,
+    required this.scheduledIn,
+    required this.scheduledOut,
   });
 }
 

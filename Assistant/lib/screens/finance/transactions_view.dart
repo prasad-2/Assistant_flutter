@@ -7,6 +7,7 @@ import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../../utils/format.dart';
 import '../../utils/icons.dart';
+import '../../widgets/amount_field.dart';
 import '../../widgets/common.dart';
 import 'transaction_form.dart';
 
@@ -226,35 +227,51 @@ class _TransactionsViewState extends State<TransactionsView> {
                         ),
                         title: Text(t.description,
                             maxLines: 1, overflow: TextOverflow.ellipsis),
+                        // date • category (+ the other account of a transfer)
                         subtitle: Text(
-                          '${fmtDateTime.format(t.dateTime)}  •  ${t.categoryName}\n'
-                          '${t.accountName}${t.isTransfer ? (credit ? '  ←  ' : '  →  ') + (t.otherAccountName ?? '') : ''}',
+                          '${fmtDateTime.format(t.dateTime)}  •  ${t.categoryName}'
+                          '${t.isTransfer ? '\n${credit ? 'from' : 'to'} ${t.otherAccountName ?? ''}' : ''}',
                         ),
-                        isThreeLine: true,
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(formatInr(t.amount.abs()),
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 19,
-                                    color: credit
-                                        ? creditColor(context)
-                                        : debitColor(context))),
-                            const SizedBox(height: 4),
-                            if (t.isScheduled)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 1),
-                                decoration: BoxDecoration(
-                                    color: Colors.orange.withValues(alpha: .2),
-                                    borderRadius: BorderRadius.circular(8)),
-                                child: const Text('Scheduled',
+                        trailing: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 150),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerRight,
+                                child: Text(formatInr(t.amount.abs()),
                                     style: TextStyle(
-                                        fontSize: 11, color: Colors.orange)),
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 19,
+                                        color: credit
+                                            ? creditColor(context)
+                                            : debitColor(context))),
                               ),
-                          ],
+                              // account name just below the value
+                              Text(t.accountName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant)),
+                              if (t.isScheduled)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                      color: Colors.orange.withValues(alpha: .2),
+                                      borderRadius: BorderRadius.circular(8)),
+                                  child: const Text('Scheduled',
+                                      style: TextStyle(
+                                          fontSize: 11, color: Colors.orange)),
+                                ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -387,17 +404,13 @@ class _FilterSheetState extends State<_FilterSheet> {
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
-                  child: TextField(
-                      controller: _min,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Min value')),
+                  child: AmountField(
+                      controller: _min, label: 'Min value', required: false),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: TextField(
-                      controller: _max,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Max value')),
+                  child: AmountField(
+                      controller: _max, label: 'Max value', required: false),
                 ),
               ]),
               const SizedBox(height: 16),

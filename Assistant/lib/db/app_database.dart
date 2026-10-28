@@ -51,7 +51,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const _fileName = 'finance_todo.db';
-  static const _version = 4;
+  static const _version = 6;
 
   /// Shared open-future so concurrent callers never open the file twice.
   Future<Database>? _opening;
@@ -114,6 +114,9 @@ class AppDatabase {
     ['Medical', 'debit', 'medical_services'],
     ['Entertainment', 'debit', 'movie'],
     ['Other Expense', 'debit', 'more_horiz'],
+    ['Emi Payment', 'debit', 'account_balance'], // used by loan EMI payments
+    ['Debt Given', 'debit', 'volunteer_activism'], // money lent to a friend
+    ['Debt Received', 'credit', 'redeem'], // money borrowed from a friend
   ];
 
   /// Creates all tables for a brand new installation.
@@ -130,6 +133,7 @@ class AppDatabase {
       notes TEXT,
       icon_key TEXT,
       icon_blob BLOB,
+      sort_order INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL)''');
     await d.execute('''CREATE TABLE categories(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,10 +174,59 @@ class AppDatabase {
       created_at INTEGER NOT NULL)''');
 
     await _createSettingsTable(d);
+    await _createLoanDebtTables(d);
 
     for (final s in _seedCategories) {
       await d.insert('categories', {'name': s[0], 'type': s[1], 'icon': s[2]});
     }
+  }
+
+  /// Loan management + debt management tables (added in schema v5).
+  Future<void> _createLoanDebtTables(Database d) async {
+    await d.execute('''CREATE TABLE IF NOT EXISTS loans(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      color INTEGER NOT NULL,
+      icon_key TEXT,
+      icon_blob BLOB,
+      principal INTEGER NOT NULL,
+      rate REAL NOT NULL,
+      tenure_value INTEGER NOT NULL,
+      tenure_unit TEXT NOT NULL,
+      start_date INTEGER NOT NULL,
+      freq_value INTEGER NOT NULL,
+      freq_unit TEXT NOT NULL,
+      foreclose_pct REAL NOT NULL DEFAULT 0,
+      penalty_pct REAL NOT NULL DEFAULT 0,
+      emi_amount INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL)''');
+    await d.execute('''CREATE TABLE IF NOT EXISTS loan_emis(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      loan_id INTEGER NOT NULL,
+      no INTEGER NOT NULL,
+      due_date INTEGER NOT NULL,
+      emi INTEGER NOT NULL,
+      principal_part INTEGER NOT NULL,
+      interest_part INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      paid_date INTEGER,
+      penalty INTEGER NOT NULL DEFAULT 0,
+      txn_id INTEGER)''');
+    await d.execute('''CREATE TABLE IF NOT EXISTS debt_people(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL)''');
+    await d.execute('''CREATE TABLE IF NOT EXISTS debt_entries(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      date_time INTEGER NOT NULL,
+      amount INTEGER NOT NULL,
+      direction TEXT NOT NULL,
+      is_setoff INTEGER NOT NULL DEFAULT 0,
+      txn_id INTEGER,
+      created_at INTEGER NOT NULL)''');
   }
 
   /// Key/value store for binary settings (e.g. the app background image).
@@ -185,6 +238,8 @@ class AppDatabase {
   ///   v1 -> v2: account notes + icons, category icons.
   ///   v2 -> v3: app_settings table (background image).
   ///   v3 -> v4: built-in "Credit Bill Repayment" category.
+  ///   v4 -> v5: loans, loan EMIs, debts + Emi Payment / Debt categories.
+  ///   v5 -> v6: accounts.sort_order (user defined card order).
   Future<void> _upgrade(Database d, int oldV, int newV) async {
     if (oldV < 2) {
       await d.execute('ALTER TABLE accounts ADD COLUMN notes TEXT');
@@ -215,6 +270,58 @@ class AppDatabase {
           'icon': 'credit_card',
         });
       }
+    }
+    if (oldV < 6) {
+      await d.execute(
+          'ALTER TABLE accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
+      // keep today's (alphabetical) order as the starting order per parent
+      final rows = await d.query('accounts',
+          columns: ['id', 'parent_id'], orderBy: 'LOWER(name)');
+      final counters = <int?, int>{};
+      for (final r in rows) {
+        final p = r['parent_id'] as int?;
+        final n = counters[p] ?? 0;
+        counters[p] = n + 1;
+        await d.update('accounts', {'sort_order': n},
+            where: 'id=?', whereArgs: [r['id']]);
+      }
+    }
+    if (oldV < 5) {
+      await _createLoanDebtTables(d);
+      for (final s in _seedCategories.skip(_seedCategories.length - 3)) {
+        final has = await d.query('categories',
+            where: 'LOWER(name)=?', whereArgs: [s[0].toLowerCase()]);
+        if (has.isEmpty) {
+          await d.insert('categories', {'name': s[0], 'type': s[1], 'icon': s[2]});
+        }
+      }
+    }
+  }
+
+  /// Id of the category called [name]; creates it when missing. Used by the
+  /// loan / debt features for their automatic bank transactions. Throws when
+  /// the user changed the category to the wrong type (it would flip signs).
+  Future<int> categoryIdByName(String name, String type, String icon) async {
+    final d = await db;
+    final r = await d.query('categories',
+        where: 'LOWER(name)=?', whereArgs: [name.toLowerCase()]);
+    if (r.isNotEmpty) {
+      if (r.first['type'] != type) {
+        throw ValidationException(
+            'The category "$name" must be of type ${type == 'debit' ? 'Deduct' : 'Credit'} for this feature. Fix it in Settings → Transaction categories.');
+      }
+      return r.first['id'] as int;
+    }
+    return d.insert('categories', {'name': name, 'type': type, 'icon': icon});
+  }
+
+  /// Clears loan / debt links that point at bank transactions about to be
+  /// deleted (matching `transactions WHERE [where]`).
+  Future<void> _unlinkTxns(DatabaseExecutor t, String where, List<Object?> args) async {
+    for (final table in ['debt_entries', 'loan_emis']) {
+      await t.rawUpdate(
+          'UPDATE $table SET txn_id=NULL WHERE txn_id IN (SELECT id FROM transactions WHERE $where)',
+          args);
     }
   }
 
@@ -288,7 +395,10 @@ class AppDatabase {
       children.putIfAbsent(p, () => []).add(a);
     }
     for (final l in children.values) {
-      l.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      // user defined order first, then name
+      l.sort((a, b) => a.sortOrder != b.sortOrder
+          ? a.sortOrder.compareTo(b.sortOrder)
+          : a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     }
 
     // ledger of an account + all descendants (memoised)
@@ -308,7 +418,8 @@ class AppDatabase {
           hasChildren: (children[a.id] ?? const <Account>[]).isNotEmpty,
           actual: aggregate(a) + (a.isCredit ? a.creditLimit : 0),
           available: availableOf(a, l),
-          scheduledNet: l.schedNet,
+          scheduledIn: l.schedCredit,
+          scheduledOut: -l.schedDebit,
         ));
         walk(a.id, depth + 1);
       }
@@ -423,18 +534,61 @@ class AppDatabase {
         }
       }
       final before = await _availableMap(t);
+      // next free position among the siblings of the (new) parent
+      Future<int> nextOrder() async {
+        final r = await t.rawQuery(
+            a.parentId == null
+                ? 'SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM accounts WHERE parent_id IS NULL'
+                : 'SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM accounts WHERE parent_id=?',
+            a.parentId == null ? [] : [a.parentId]);
+        return (r.first['n'] as num).toInt();
+      }
+
       int id;
       if (a.id == null) {
         final m = a.toMap();
         m['created_at'] = DateTime.now().millisecondsSinceEpoch;
+        m['sort_order'] = await nextOrder();
         id = await t.insert('accounts', m);
       } else {
-        await t.update('accounts', a.toMap(), where: 'id=?', whereArgs: [a.id]);
+        final m = a.toMap(); // toMap never contains sort_order: it is kept
+        final old = await t.query('accounts',
+            columns: ['parent_id'], where: 'id=?', whereArgs: [a.id]);
+        if (old.isNotEmpty && old.first['parent_id'] != a.parentId) {
+          m['sort_order'] = await nextOrder(); // moved to another parent
+        }
+        await t.update('accounts', m, where: 'id=?', whereArgs: [a.id]);
         id = a.id!;
       }
       // e.g. switching to a smaller credit limit may break balances
       await _validate(t, before: before);
       return id;
+    });
+  }
+
+  /// Moves an account one step up / down among its siblings of the SAME type
+  /// (same parent, both normal or both credit) and saves the new order.
+  Future<void> moveAccount(int id, {required bool up}) async {
+    final d = await db;
+    await d.transaction((t) async {
+      final accs = await _accounts(t);
+      final me = accs.firstWhere((a) => a.id == id);
+      final sibs = accs
+          .where((a) => a.parentId == me.parentId && a.isCredit == me.isCredit)
+          .toList()
+        ..sort((a, b) => a.sortOrder != b.sortOrder
+            ? a.sortOrder.compareTo(b.sortOrder)
+            : a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      final i = sibs.indexWhere((a) => a.id == id);
+      final j = up ? i - 1 : i + 1;
+      if (j < 0 || j >= sibs.length) return;
+      final tmp = sibs[i];
+      sibs[i] = sibs[j];
+      sibs[j] = tmp;
+      for (var k = 0; k < sibs.length; k++) {
+        await t.update('accounts', {'sort_order': k},
+            where: 'id=?', whereArgs: [sibs[k].id]);
+      }
     });
   }
 
@@ -469,6 +623,7 @@ class AppDatabase {
         throw ValidationException(
             'This account has $tr self-transfer transaction(s) linked with other accounts. Delete those transfers first so other balances stay correct.');
       }
+      await _unlinkTxns(t, 'account_id=?', [id]);
       await t.delete('transactions', where: 'account_id=?', whereArgs: [id]);
       await t.delete('accounts', where: 'id=?', whereArgs: [id]);
       await _validate(t, before: before);
@@ -700,9 +855,11 @@ class AppDatabase {
   /// Adds a transaction. A self transfer / credit bill repayment creates TWO
   /// rows sharing one `transfer_group`: a debit on the "from" account and a
   /// credit on the "to" account.
-  Future<void> addTransaction(TxnInput i) async {
+  /// Returns the id of the (first) inserted row.
+  Future<int> addTransaction(TxnInput i) async {
     final d = await db;
-    await d.transaction((t) async {
+    return d.transaction((t) async {
+      var firstId = 0;
       final cat = await _category(t, i.categoryId);
       _checkInput(i, cat);
       if (cat.isRepayment) await _checkRepayment(t, i);
@@ -729,15 +886,16 @@ class AppDatabase {
 
       if (cat.isTwoLeg) {
         final g = '${now}_${Random().nextInt(1 << 30)}';
-        await t.insert('transactions', row(i.accountId, -i.amountPaise, g));
+        firstId = await t.insert('transactions', row(i.accountId, -i.amountPaise, g));
         await t.insert('transactions', row(i.toAccountId!, i.amountPaise, g));
       } else {
         // sign comes from the category type: credit adds, deduct subtracts
         final amt = cat.isCredit ? i.amountPaise : -i.amountPaise;
-        await t.insert('transactions', row(i.accountId, amt, null));
+        firstId = await t.insert('transactions', row(i.accountId, amt, null));
       }
       // scheduled entries may push the AVAILABLE balance below zero
       await _validate(t, before: before, skipAvailable: sched);
+      return firstId;
     });
   }
 
@@ -819,6 +977,8 @@ class AppDatabase {
       final group = rows.first['transfer_group'] as String?;
       final wasScheduled = rows.first['status'] == 'scheduled';
       final before = await _availableMap(t);
+      await _unlinkTxns(t, group != null ? 'transfer_group=?' : 'id=?',
+          [group ?? id]);
       if (group != null) {
         await t.delete('transactions',
             where: 'transfer_group=?', whereArgs: [group]);
