@@ -782,6 +782,38 @@ class AppDatabase {
     return rows.map(TxnRecord.fromMap).toList();
   }
 
+  /// How often each category / account is used by transactions (all time).
+  /// [column] is `category_id` or `account_id`. Used to put the most used
+  /// items on top of the selection lists in the transaction form.
+  Future<Map<int, int>> usageCounts(String column) async {
+    assert(column == 'category_id' || column == 'account_id');
+    final rows = await (await db).rawQuery(
+        'SELECT $column AS id, COUNT(*) AS c FROM transactions GROUP BY $column');
+    return {for (final r in rows) r['id'] as int: (r['c'] as num).toInt()};
+  }
+
+  /// Most used descriptions (optionally for one category and/or containing
+  /// [query]), most frequent first, then most recent.
+  Future<List<String>> frequentDescriptions(
+      {int? categoryId, String query = '', int limit = 8}) async {
+    final where = <String>[];
+    final args = <Object?>[];
+    if (categoryId != null) {
+      where.add('category_id=?');
+      args.add(categoryId);
+    }
+    if (query.trim().isNotEmpty) {
+      where.add('description LIKE ?');
+      args.add('%${query.trim()}%');
+    }
+    final rows = await (await db).rawQuery(
+        'SELECT description, COUNT(*) AS c, MAX(date_time) AS m FROM transactions '
+        '${where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}'} '
+        'GROUP BY LOWER(description) ORDER BY c DESC, m DESC LIMIT $limit',
+        args);
+    return [for (final r in rows) r['description'] as String];
+  }
+
   /// Loads a transaction as form input. For a self transfer both legs are
   /// read so the form can show the "from" and "to" account.
   Future<TxnInput> loadInput(int id) async {

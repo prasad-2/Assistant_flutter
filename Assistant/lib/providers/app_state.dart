@@ -1,5 +1,7 @@
 // Central app state (Provider). Holds cached lists loaded from the database
 // plus UI preferences. Screens call the `refresh*` methods after changing data.
+import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -23,6 +25,18 @@ class AppState extends ChangeNotifier {
     seedLight = prefs.getInt('seed_light') ?? kDefaultSeed;
     seedDark = prefs.getInt('seed_dark'); // null = same colour as light mode
     bgOpacity = prefs.getDouble('bg_opacity') ?? 0.35;
+    // start-of-day snapshot of the available balances (see _ensureDailySnapshot)
+    final snap = prefs.getString('daily_snap');
+    if (snap != null) {
+      try {
+        final m = jsonDecode(snap) as Map<String, dynamic>;
+        _snapDate = m['date'] as String;
+        _snapAvail = {
+          for (final e in (m['avail'] as Map<String, dynamic>).entries)
+            int.parse(e.key): (e.value as num).toInt()
+        };
+      } catch (_) {}
+    }
     // per-account show/hide choices are stored as "id:1" (hidden) / "id:0" (shown)
     for (final e in prefs.getStringList('acc_hide') ?? <String>[]) {
       final p = e.split(':');
@@ -69,6 +83,53 @@ class AppState extends ChangeNotifier {
   Future<void> _saveAccountHide() => prefs.setStringList('acc_hide',
       accountHide.entries.map((e) => '${e.key}:${e.value ? 1 : 0}').toList());
 
+  // ── daily limit: start-of-day snapshot ──
+  String _snapDate = ''; // day the snapshot belongs to (y-m-d)
+  Map<int, int> _snapAvail = {}; // accountId -> available at the start of the day
+  Timer? _midnightTimer;
+
+  /// Today's actual money out / in on the regular accounts (paise).
+  int todayOut = 0;
+  int todayIn = 0;
+
+  static String _dateKey(DateTime d) => '${d.year}-${d.month}-${d.day}';
+
+  /// Takes the "12 am" snapshot of every account's available balance the
+  /// first time the app (or the widget) runs on a new day, BEFORE the user
+  /// changes anything that day, so it equals the balance at midnight.
+  void _ensureDailySnapshot() {
+    final today = _dateKey(DateTime.now());
+    if (_snapDate == today) return;
+    _snapDate = today;
+    _snapAvail = {for (final x in summaries) x.account.id!: x.available};
+    prefs.setString(
+        'daily_snap',
+        jsonEncode({
+          'date': today,
+          'avail': {for (final e in _snapAvail.entries) '${e.key}': e.value}
+        }));
+  }
+
+  /// Wakes up just after midnight (if the app is open) so the limit renews
+  /// at 12 am even without any user action.
+  void _scheduleMidnight() {
+    _midnightTimer?.cancel();
+    final n = DateTime.now();
+    final next = DateTime(n.year, n.month, n.day + 1, 0, 0, 2);
+    _midnightTimer = Timer(next.difference(n), () async {
+      await refreshFinance();
+      _scheduleMidnight();
+    });
+  }
+
+  /// Available balance of the regular accounts at the start of today.
+  int get startOfDayAvailable => summaries
+      .where((x) => x.account.isRegular)
+      .fold<int>(0, (s, x) => s + (_snapAvail[x.account.id] ?? 0));
+
+  /// The day's ORIGINAL daily limit (start-of-day available / days left).
+  int get originalDailyLimit => (startOfDayAvailable / daysLeftInMonth).round();
+
   /// Sum of the AVAILABLE balances of all regular accounts.
   int get regularAvailable => summaries
       .where((x) => x.account.isRegular)
@@ -81,6 +142,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Daily limit = regular accounts' available balance / days left this month.
+  /// It follows every transaction during the day.
   int get dailyLimit => (regularAvailable / daysLeftInMonth).round();
 
   /// Ids of parent accounts whose child accounts are collapsed (Finance tab).
@@ -116,6 +178,7 @@ class AppState extends ChangeNotifier {
     await refreshFinance(notify: false);
     await refreshTodos(notify: false);
     notifyListeners();
+    _scheduleMidnight();
     await rescheduleReminders();
   }
 
@@ -133,9 +196,34 @@ class AppState extends ChangeNotifier {
     categories = await _db.getCategories();
     loans = await LoanRepository.instance.summaries();
     people = await DebtRepository.instance.people();
+    _ensureDailySnapshot();
+    await _loadTodayTotals();
     financeVersion++;
     if (notify) notifyListeners();
     WidgetBridge.refresh(); // home-screen widget shows recent transactions
+  }
+
+  /// Today's actual debits / credits on the regular accounts.
+  Future<void> _loadTodayTotals() async {
+    final regular = {
+      for (final x in summaries)
+        if (x.account.isRegular) x.account.id
+    };
+    final now = DateTime.now();
+    final list = regular.isEmpty
+        ? <TxnRecord>[]
+        : await _db.queryTransactions(
+            TxnFilter(from: now, to: now, status: 'actual'));
+    todayOut = 0;
+    todayIn = 0;
+    for (final t in list) {
+      if (!regular.contains(t.accountId)) continue;
+      if (t.amount < 0) {
+        todayOut += -t.amount;
+      } else {
+        todayIn += t.amount;
+      }
+    }
   }
 
   Future<void> refreshTodos({bool notify = true}) async {

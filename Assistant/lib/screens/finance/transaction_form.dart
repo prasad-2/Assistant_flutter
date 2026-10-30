@@ -42,10 +42,49 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
   bool _saving = false;
   bool _showCalc = false; // calculator panel visible
 
+  // usage statistics: how often each category / account was used before
+  Map<int, int> _catUse = {};
+  Map<int, int> _accUse = {};
+  List<String> _suggestions = []; // frequently used descriptions
+  int _suggestToken = 0; // ignores out-of-date async answers
+
   @override
   void initState() {
     super.initState();
     _init();
+    _desc.addListener(_loadSuggestions); // refresh suggestions while typing
+  }
+
+  /// Loads the most used descriptions (for the chosen category / typed text).
+  Future<void> _loadSuggestions() async {
+    final token = ++_suggestToken;
+    final typed = _desc.text.trim();
+    final list = await AppDatabase.instance
+        .frequentDescriptions(categoryId: _cat?.id, query: typed, limit: 8);
+    if (!mounted || token != _suggestToken) return;
+    setState(() => _suggestions = [
+          for (final d in list)
+            if (d.toLowerCase() != typed.toLowerCase()) d
+        ].take(6).toList());
+  }
+
+  /// Orders [items] by how often they were used (most used first, then name).
+  List<T> _byUsage<T>(List<T> items, int Function(T) id, Map<int, int> use,
+      String Function(T) name) {
+    final l = [...items];
+    l.sort((a, b) {
+      final c = (use[id(b)] ?? 0).compareTo(use[id(a)] ?? 0);
+      return c != 0 ? c : name(a).toLowerCase().compareTo(name(b).toLowerCase());
+    });
+    return l;
+  }
+
+  /// True for the three most used items (they get a star).
+  bool _isFrequent(int id, Map<int, int> use) {
+    final c = use[id] ?? 0;
+    if (c == 0) return false;
+    final top = use.values.toList()..sort((a, b) => b.compareTo(a));
+    return c >= top[top.length < 3 ? top.length - 1 : 2];
   }
 
   @override
@@ -58,6 +97,8 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
   /// Loads the transaction being edited (if any) into the form fields.
   Future<void> _init() async {
     final st = context.read<AppState>();
+    _catUse = await AppDatabase.instance.usageCounts('category_id');
+    _accUse = await AppDatabase.instance.usageCounts('account_id');
     if (widget.editId != null) {
       final i = await AppDatabase.instance.loadInput(widget.editId!);
       _cat = st.categories.firstWhere((c) => c.id == i.categoryId);
@@ -77,6 +118,7 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
       _from = st.accounts.first.id; // only one account: preselect it
     }
     if (mounted) setState(() => _loading = false);
+    _loadSuggestions();
   }
 
   /// Date picker followed by time picker.
@@ -133,8 +175,9 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
   }
 
   /// Dropdown items showing the account colour dot and its nested path.
+  /// Most used accounts first; the top three carry a star.
   List<DropdownMenuItem<int>> _accountItems(List<Account> all) => [
-        for (final a in all)
+        for (final a in _byUsage<Account>(all, (x) => x.id!, _accUse, (x) => x.name))
           DropdownMenuItem<int>(
             value: a.id,
             child: Row(children: [
@@ -142,6 +185,8 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
               const SizedBox(width: 8),
               Expanded(
                   child: Text(accountPath(a, all), overflow: TextOverflow.ellipsis)),
+              if (_isFrequent(a.id!, _accUse))
+                const Icon(Icons.star_rounded, size: 16, color: Colors.amber),
             ]),
           ),
       ];
@@ -240,7 +285,9 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
                               labelText: 'Category',
                               prefixIcon: Icon(Icons.label_outline)),
                           items: [
-                            for (final c in cats)
+                            // most used categories first (top three starred)
+                            for (final c in _byUsage<Category>(
+                                cats, (x) => x.id!, _catUse, (x) => x.name))
                               DropdownMenuItem(
                                 value: c.id,
                                 child: Row(children: [
@@ -249,6 +296,9 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
                                   Expanded(
                                       child: Text('${c.name}  •  ${c.typeLabel}',
                                           overflow: TextOverflow.ellipsis)),
+                                  if (_isFrequent(c.id!, _catUse))
+                                    const Icon(Icons.star_rounded,
+                                        size: 16, color: Colors.amber),
                                 ]),
                               ),
                           ],
@@ -256,6 +306,7 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
                           onChanged: (v) => setState(() {
                             _cat = cats.firstWhere((c) => c.id == v);
                             _fixAccountsForCategory(st.accounts);
+                            _loadSuggestions();
                           }),
                         ),
                         DropdownButtonFormField<int>(
@@ -350,6 +401,20 @@ class _TransactionFormPageState extends State<TransactionFormPage> {
                           validator: (v) =>
                               (v == null || v.trim().isEmpty) ? 'Required' : null,
                         ),
+                        // frequently used descriptions: tap to fill the field
+                        if (_suggestions.isNotEmpty)
+                          Wrap(spacing: 8, runSpacing: 4, children: [
+                            for (final d in _suggestions)
+                              ActionChip(
+                                avatar: const Icon(Icons.history, size: 16),
+                                label: Text(d, overflow: TextOverflow.ellipsis),
+                                onPressed: () {
+                                  _desc.text = d;
+                                  _desc.selection =
+                                      TextSelection.collapsed(offset: d.length);
+                                },
+                              ),
+                          ]),
                         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           SizedBox(
                             width: double.infinity,

@@ -58,6 +58,9 @@ class HomeScreen extends StatelessWidget {
                 available: s.regularAvailable,
                 daysLeft: s.daysLeftInMonth,
                 perDay: s.dailyLimit,
+                originalPerDay: s.originalDailyLimit,
+                spentToday: s.todayOut,
+                receivedToday: s.todayIn,
                 hidden: s.hideBalances),
           ],
           const SizedBox(height: 10),
@@ -210,56 +213,96 @@ class _ClockCardState extends State<_ClockCard> {
   }
 }
 
-/// "Daily limit": available balance of all regular accounts divided by the
-/// number of days left in the current month (today included).
+/// "Daily limit" card.
+///   * current limit  = available balance of the regular accounts / days left
+///     (changes with every transaction)
+///   * day-start limit = the same calculation with the balance at 12 am today
+///     (fixed for the whole day, renews every midnight)
+///   * spent / received today = actual debits / credits of the regular
+///     accounts dated today
 class _DailyLimitCard extends StatelessWidget {
-  final int available; // sum of regular accounts' available balance
+  final int available; // sum of regular accounts' available balance now
   final int daysLeft;
-  final int perDay;
+  final int perDay; // current daily limit
+  final int originalPerDay; // limit at the start of the day
+  final int spentToday;
+  final int receivedToday;
   final bool hidden;
   const _DailyLimitCard(
       {required this.available,
       required this.daysLeft,
       required this.perDay,
+      required this.originalPerDay,
+      required this.spentToday,
+      required this.receivedToday,
       required this.hidden});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final fg = cs.onSecondaryContainer;
     // red when the available money is already negative
-    final color = perDay < 0 ? debitColor(context) : cs.onSecondaryContainer;
+    final color = perDay < 0 ? debitColor(context) : fg;
+
+    /// small label + value cell used in the second row
+    Widget mini(String label, String value, {Color? valueColor}) => Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, color: fg.withValues(alpha: .75))),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(value,
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500, color: valueColor ?? fg)),
+            ),
+          ]),
+        );
+
     return Card(
       margin: EdgeInsets.zero,
       color: cs.secondaryContainer,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        child: Row(children: [
-          Icon(Icons.speed, color: cs.onSecondaryContainer),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Daily limit',
-                  style: TextStyle(
-                      fontSize: 12, color: cs.onSecondaryContainer.withValues(alpha: .8))),
-              Text(
-                  '${formatInr(available, hidden: hidden)}  ÷  $daysLeft day${daysLeft == 1 ? '' : 's'} left',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 11, color: cs.onSecondaryContainer.withValues(alpha: .8))),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 170),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Text('${formatInr(perDay, hidden: hidden)} / day',
-                  style: TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.w500, color: color)),
+        child: Column(children: [
+          Row(children: [
+            Icon(Icons.speed, color: fg),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Daily limit',
+                    style: TextStyle(fontSize: 12, color: fg.withValues(alpha: .8))),
+                Text(
+                    '${formatInr(available, hidden: hidden)}  ÷  $daysLeft day${daysLeft == 1 ? '' : 's'} left',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: fg.withValues(alpha: .8))),
+              ]),
             ),
-          ),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 170),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text('${formatInr(perDay, hidden: hidden)} / day',
+                    style: TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.w500, color: color)),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          Divider(height: 1, color: fg.withValues(alpha: .2)),
+          const SizedBox(height: 6),
+          Row(children: [
+            mini('Day-start limit', '${formatInr(originalPerDay, hidden: hidden)} / day'),
+            mini('Spent today', formatInr(spentToday, hidden: hidden),
+                valueColor: (!hidden && spentToday > 0) ? debitColor(context) : null),
+            mini('Received today', formatInr(receivedToday, hidden: hidden),
+                valueColor: (!hidden && receivedToday > 0) ? creditColor(context) : null),
+          ]),
         ]),
       ),
     );

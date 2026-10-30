@@ -49,8 +49,15 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
   bool _showOut = true; // true = money out (expenses), false = money in
   bool _includeScheduled = false;
   bool _loading = true;
-  List<_Slice> _out = [];
-  List<_Slice> _in = [];
+  List<_Slice> _allOut = []; // every category of the period (unfiltered)
+  List<_Slice> _allIn = [];
+
+  /// Categories the user UNselected. Empty = all categories (the default),
+  /// so categories that appear later are selected automatically.
+  final Set<int> _unselected = {};
+
+  List<_Slice> get _out => _allOut.where((s) => !_unselected.contains(s.categoryId)).toList();
+  List<_Slice> get _in => _allIn.where((s) => !_unselected.contains(s.categoryId)).toList();
 
   @override
   void initState() {
@@ -102,10 +109,87 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
     int byTotal(_Slice a, _Slice b) => b.total.compareTo(a.total);
     if (!mounted) return;
     setState(() {
-      _out = out.values.toList()..sort(byTotal);
-      _in = inn.values.toList()..sort(byTotal);
+      _allOut = out.values.toList()..sort(byTotal);
+      _allIn = inn.values.toList()..sort(byTotal);
       _loading = false;
     });
+  }
+
+  /// Bottom sheet with a checkbox per category (all selected by default).
+  Future<void> _chooseCategories() async {
+    // every category that has data in this period, biggest first
+    final byId = <int, _Slice>{};
+    for (final s in [..._allOut, ..._allIn]) {
+      final cur = byId[s.categoryId];
+      byId[s.categoryId] = _Slice(s.categoryId, s.name, s.icon, (cur?.total ?? 0) + s.total);
+    }
+    final all = byId.values.toList()..sort((a, b) => b.total.compareTo(a.total));
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        void change(VoidCallback f) {
+          setS(f); // update the sheet
+          setState(f); // and the chart behind it
+        }
+
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: .75,
+          maxChildSize: .95,
+          builder: (ctx, scroll) => Column(children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 0),
+              child: Row(children: [
+                Expanded(
+                    child: Text('Categories',
+                        style: Theme.of(ctx).textTheme.titleLarge)),
+                TextButton(
+                    onPressed: () => change(() => _unselected.clear()),
+                    child: const Text('Select all')),
+                TextButton(
+                    onPressed: () => change(() =>
+                        _unselected.addAll(all.map((s) => s.categoryId))),
+                    child: const Text('Clear all')),
+              ]),
+            ),
+            Expanded(
+              child: all.isEmpty
+                  ? const Center(child: Text('No categories in this period'))
+                  : ListView(controller: scroll, children: [
+                      for (final s in all)
+                        CheckboxListTile(
+                          value: !_unselected.contains(s.categoryId),
+                          secondary: Icon(categoryIconFor(s.icon)),
+                          title: Text(s.name),
+                          subtitle: Text(_allOut.any((o) => o.categoryId == s.categoryId) &&
+                                  _allIn.any((i) => i.categoryId == s.categoryId)
+                              ? 'in and out'
+                              : (_allOut.any((o) => o.categoryId == s.categoryId)
+                                  ? 'out'
+                                  : 'in')),
+                          onChanged: (v) => change(() {
+                            if (v == true) {
+                              _unselected.remove(s.categoryId);
+                            } else {
+                              _unselected.add(s.categoryId);
+                            }
+                          }),
+                        ),
+                    ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+              ),
+            ),
+          ]),
+        );
+      }),
+    );
   }
 
   Future<void> _pickCustom() async {
@@ -183,7 +267,7 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
               Text('${fmtDate.format(r.start)}  –  ${fmtDate.format(r.end)}',
                   style: TextStyle(color: cs.onSurfaceVariant)),
               const Spacer(),
-              const Text('Include scheduled', style: TextStyle(fontSize: 12)),
+              const Text('Scheduled', style: TextStyle(fontSize: 12)),
               Switch(
                   value: _includeScheduled,
                   onChanged: (v) {
@@ -192,6 +276,23 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
                   }),
             ]),
           ),
+          // ── category selection ──
+          Builder(builder: (context) {
+            final ids = {for (final s in [..._allOut, ..._allIn]) s.categoryId};
+            final selected = ids.where((i) => !_unselected.contains(i)).length;
+            return Row(children: [
+              OutlinedButton.icon(
+                onPressed: _chooseCategories,
+                icon: const Icon(Icons.checklist),
+                label: Text('Categories ($selected/${ids.length})'),
+              ),
+              if (_unselected.any(ids.contains))
+                TextButton(
+                    onPressed: () => setState(_unselected.clear),
+                    child: const Text('Show all')),
+            ]);
+          }),
+          const SizedBox(height: 6),
           // ── in / out summary ──
           Card(
             elevation: 0,

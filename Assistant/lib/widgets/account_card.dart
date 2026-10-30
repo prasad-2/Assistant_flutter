@@ -268,12 +268,15 @@ class AccountCard extends StatelessWidget {
     );
   }
 
-  /// Bottom strip: Actual, Scheduled IN, Scheduled OUT and (credit accounts)
-  /// credit limit + total spend.
+  /// Bottom strip, ONE row of four equal columns so the card does not grow:
+  ///   Actual | Scheduled in | Scheduled out | Summary
+  /// Summary = actual + scheduled in - scheduled out (the projected total).
+  /// Credit accounts get a second row: credit limit and total spend.
+  /// Every value is scaled down to its column, so values never overlap.
   Widget _metrics(BuildContext context, Account a) {
-    // Scheduled money is shown separately: coming in (green) / going out (red).
     final inn = summary.scheduledIn;
     final out = summary.scheduledOut;
+    final projected = summary.actual + inn - out;
 
     // credit account: total spend = credit limit - ACTUAL value
     // (scheduled entries are deliberately ignored here)
@@ -281,47 +284,45 @@ class AccountCard extends StatelessWidget {
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
-          _compact ? 10 : 12, _compact ? 6 : 8, 10, _compact ? 7 : 10),
-      child: LayoutBuilder(builder: (context, c) {
-        final maxW = c.maxWidth;
-        return Wrap(spacing: 18, runSpacing: _compact ? 4 : 6, children: [
-          _metric(context, 'Actual', formatInr(summary.actual, hidden: hidden),
-              maxW: maxW),
-          _metric(context, 'Scheduled in', formatInr(inn, hidden: hidden),
-              maxW: maxW,
+          _compact ? 10 : 12, _compact ? 6 : 8, 6, _compact ? 7 : 10),
+      child: Column(children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _cell(context, 'Actual', formatInr(summary.actual, hidden: hidden)),
+          _cell(context, 'Scheduled in', formatInr(inn, hidden: hidden),
               color: (!hidden && inn > 0) ? creditColor(context) : null,
               icon: (!hidden && inn > 0) ? Icons.south_west : null),
-          _metric(context, 'Scheduled out', formatInr(out, hidden: hidden),
-              maxW: maxW,
+          _cell(context, 'Scheduled out', formatInr(out, hidden: hidden),
               color: (!hidden && out > 0) ? debitColor(context) : null,
               icon: (!hidden && out > 0) ? Icons.north_east : null),
-          if (a.isCredit) ...[
-            _metric(context, 'Credit limit',
-                formatInr(a.creditLimit, hidden: hidden),
-                maxW: maxW),
-            _metric(context, 'Total spend', formatInr(totalSpend, hidden: hidden),
-                maxW: maxW, color: hidden ? null : debitColor(context)),
-          ],
-        ]);
-      }),
+          _cell(context, 'Summary', formatInr(projected, hidden: hidden)),
+        ]),
+        if (a.isCredit) ...[
+          SizedBox(height: _compact ? 4 : 6),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _cell(context, 'Credit limit', formatInr(a.creditLimit, hidden: hidden)),
+            _cell(context, 'Total spend', formatInr(totalSpend, hidden: hidden),
+                color: hidden ? null : debitColor(context)),
+            const Spacer(flex: 2),
+          ]),
+        ],
+      ]),
     );
   }
 
-  /// One label + value. The value is scaled down (never wrapped/overlapped)
-  /// when it is wider than the whole card.
-  Widget _metric(BuildContext context, String label, String text,
-      {required double maxW, Color? color, IconData? icon}) {
+  /// One equal-width column: small label above a value that scales down.
+  Widget _cell(BuildContext context, String label, String text,
+      {Color? color, IconData? icon}) {
     final cs = Theme.of(context).colorScheme;
-    final fs = _compact ? 13.0 : 15.0;
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxW),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    final fs = _compact ? 12.0 : 13.5;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: _compact ? 10 : 11, color: cs.onSurfaceVariant)),
+                  fontSize: _compact ? 9.5 : 10.5, color: cs.onSurfaceVariant)),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -330,11 +331,11 @@ class AccountCard extends StatelessWidget {
               Text(text,
                   style: TextStyle(
                       fontSize: fs,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                       color: color ?? cs.onSurface)),
             ]),
           ),
-        ],
+        ]),
       ),
     );
   }
