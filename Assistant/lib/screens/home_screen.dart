@@ -213,7 +213,7 @@ class _ClockCardState extends State<_ClockCard> {
   }
 }
 
-/// "Daily limit" card.
+/// "Daily limit" card (positive values green, negative red).
 ///   * current limit  = available balance of the regular accounts / days left
 ///     (changes with every transaction)
 ///   * day-start limit = the same calculation with the balance at 12 am today
@@ -241,8 +241,13 @@ class _DailyLimitCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final fg = cs.onSecondaryContainer;
-    // red when the available money is already negative
-    final color = perDay < 0 ? debitColor(context) : fg;
+    // Colours by sign: positive = green, negative = red, zero / hidden = normal.
+    Color? sign(int v) => hidden || v == 0
+        ? null
+        : (v > 0 ? creditColor(context) : debitColor(context));
+    final color = sign(perDay) ?? fg;
+    // summary of today = received - spent (spent counts as negative)
+    final net = receivedToday - spentToday;
 
     /// small label + value cell used in the second row
     Widget mini(String label, String value, {Color? valueColor}) => Expanded(
@@ -289,7 +294,9 @@ class _DailyLimitCard extends StatelessWidget {
                 alignment: Alignment.centerRight,
                 child: Text('${formatInr(perDay, hidden: hidden)} / day',
                     style: TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w500, color: color)),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w500,
+                        color: sign(perDay) ?? fg)),
               ),
             ),
           ]),
@@ -297,11 +304,13 @@ class _DailyLimitCard extends StatelessWidget {
           Divider(height: 1, color: fg.withValues(alpha: .2)),
           const SizedBox(height: 6),
           Row(children: [
-            mini('Day-start limit', '${formatInr(originalPerDay, hidden: hidden)} / day'),
+            mini('Day-start limit', '${formatInr(originalPerDay, hidden: hidden)} / day',
+                valueColor: sign(originalPerDay)),
             mini('Spent today', formatInr(spentToday, hidden: hidden),
-                valueColor: (!hidden && spentToday > 0) ? debitColor(context) : null),
+                valueColor: sign(-spentToday)),
             mini('Received today', formatInr(receivedToday, hidden: hidden),
-                valueColor: (!hidden && receivedToday > 0) ? creditColor(context) : null),
+                valueColor: sign(receivedToday)),
+            mini('Summary', formatInr(net, hidden: hidden), valueColor: sign(net)),
           ]),
         ]),
       ),

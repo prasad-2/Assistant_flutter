@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../utils/format.dart';
 import 'account_avatar.dart';
+import 'account_breakdown.dart';
 import 'common.dart';
 
 enum AccountCardSize { regular, compact }
@@ -222,7 +223,10 @@ class AccountCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               // the value never takes more than ~62 % of the width
-              ConstrainedBox(
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => _explain(context, BreakdownKind.available),
+                child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: c.maxWidth * .62),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -261,6 +265,7 @@ class AccountCard extends StatelessWidget {
                   ],
                 ),
               ),
+              ), // InkWell (tap = explain Available)
             ]),
           );
         }),
@@ -268,11 +273,24 @@ class AccountCard extends StatelessWidget {
     );
   }
 
+  /// green for positive, red for negative, neutral for zero or hidden values
+  Color? _sign(BuildContext context, int v) {
+    if (hidden || v == 0) return null;
+    return v > 0 ? creditColor(context) : debitColor(context);
+  }
+
+  /// Opens the "how is this calculated" popup for the tapped value.
+  void _explain(BuildContext context, BreakdownKind kind) {
+    if (reorderMode) return;
+    showAccountBreakdown(context, summary, kind, hidden: hidden);
+  }
+
   /// Bottom strip, ONE row of four equal columns so the card does not grow:
   ///   Actual | Scheduled in | Scheduled out | Summary
   /// Summary = actual + scheduled in - scheduled out (the projected total).
   /// Credit accounts get a second row: credit limit and total spend.
-  /// Every value is scaled down to its column, so values never overlap.
+  /// Colours: positive = green, negative = red. "Scheduled out" is money
+  /// leaving, so it is red. Tapping a value explains its calculation.
   Widget _metrics(BuildContext context, Account a) {
     final inn = summary.scheduledIn;
     final out = summary.scheduledOut;
@@ -287,21 +305,25 @@ class AccountCard extends StatelessWidget {
           _compact ? 10 : 12, _compact ? 6 : 8, 6, _compact ? 7 : 10),
       child: Column(children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _cell(context, 'Actual', formatInr(summary.actual, hidden: hidden)),
+          _cell(context, 'Actual', formatInr(summary.actual, hidden: hidden),
+              color: _sign(context, summary.actual),
+              onTap: () => _explain(context, BreakdownKind.actual)),
           _cell(context, 'Scheduled in', formatInr(inn, hidden: hidden),
-              color: (!hidden && inn > 0) ? creditColor(context) : null,
-              icon: (!hidden && inn > 0) ? Icons.south_west : null),
+              color: _sign(context, inn),
+              onTap: () => _explain(context, BreakdownKind.scheduledIn)),
           _cell(context, 'Scheduled out', formatInr(out, hidden: hidden),
               color: (!hidden && out > 0) ? debitColor(context) : null,
-              icon: (!hidden && out > 0) ? Icons.north_east : null),
-          _cell(context, 'Summary', formatInr(projected, hidden: hidden)),
+              onTap: () => _explain(context, BreakdownKind.scheduledOut)),
+          _cell(context, 'Summary', formatInr(projected, hidden: hidden),
+              color: _sign(context, projected),
+              onTap: () => _explain(context, BreakdownKind.summary)),
         ]),
         if (a.isCredit) ...[
           SizedBox(height: _compact ? 4 : 6),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _cell(context, 'Credit limit', formatInr(a.creditLimit, hidden: hidden)),
             _cell(context, 'Total spend', formatInr(totalSpend, hidden: hidden),
-                color: hidden ? null : debitColor(context)),
+                color: (!hidden && totalSpend > 0) ? debitColor(context) : null),
             const Spacer(flex: 2),
           ]),
         ],
@@ -310,32 +332,34 @@ class AccountCard extends StatelessWidget {
   }
 
   /// One equal-width column: small label above a value that scales down.
+  /// When [onTap] is given the whole column is tappable.
   Widget _cell(BuildContext context, String label, String text,
-      {Color? color, IconData? icon}) {
+      {Color? color, VoidCallback? onTap}) {
     final cs = Theme.of(context).colorScheme;
     final fs = _compact ? 12.0 : 13.5;
     return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.only(right: 6),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: _compact ? 9.5 : 10.5, color: cs.onSurfaceVariant)),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (icon != null) Icon(icon, size: fs, color: color),
-              Text(text,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 6, top: 2, bottom: 2),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: _compact ? 9.5 : 10.5, color: cs.onSurfaceVariant)),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(text,
                   style: TextStyle(
                       fontSize: fs,
                       fontWeight: FontWeight.w500,
                       color: color ?? cs.onSurface)),
-            ]),
-          ),
-        ]),
+            ),
+          ]),
+        ),
       ),
     );
   }
