@@ -17,6 +17,15 @@ import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../services/widget_bridge.dart';
 
+/// One regular account in the daily-limit recalculation popup.
+class DayStartLine {
+  final Account account;
+  final int saved; // start-of-day available stored at 12 am
+  final int recalculated; // recomputed from the transaction dates
+  const DayStartLine(
+      {required this.account, required this.saved, required this.recalculated});
+}
+
 class AppState extends ChangeNotifier {
   AppState(this.prefs) : auth = AuthService(prefs) {
     themeMode = ThemeMode.values[(prefs.getInt('theme') ?? 0).clamp(0, 2)];
@@ -104,12 +113,47 @@ class AppState extends ChangeNotifier {
     if (_snapDate == today) return;
     _snapDate = today;
     _snapAvail = {for (final x in summaries) x.account.id!: x.available};
-    prefs.setString(
-        'daily_snap',
-        jsonEncode({
-          'date': today,
-          'avail': {for (final e in _snapAvail.entries) '${e.key}': e.value}
-        }));
+    _saveSnapshot();
+  }
+
+  void _saveSnapshot() => prefs.setString(
+      'daily_snap',
+      jsonEncode({
+        'date': _snapDate,
+        'avail': {for (final e in _snapAvail.entries) '${e.key}': e.value}
+      }));
+
+  /// For the "recalculate daily limit" popup: every regular account with its
+  /// SAVED start-of-day balance and the RECALCULATED one.
+  ///
+  /// Recalculated = balance at 12:00 am today judged by transaction DATE:
+  ///   actual transactions dated before today + scheduled debits (blocked)
+  ///   (+ credit limit for credit accounts), exactly like "Available".
+  /// So an entry added after the reset but dated before today is included,
+  /// while entries dated today are today's movements and are not.
+  Future<List<DayStartLine>> dayStartLines() async {
+    final n = DateTime.now();
+    final ledgers = await _db.ledgersAsOf(DateTime(n.year, n.month, n.day));
+    return [
+      for (final x in summaries)
+        if (x.account.isRegular)
+          DayStartLine(
+            account: x.account,
+            saved: _snapAvail[x.account.id] ?? 0,
+            recalculated: availableOf(
+                x.account, ledgers[x.account.id] ?? Ledger()),
+          )
+    ];
+  }
+
+  /// Stores the recalculated balances as today's start-of-day snapshot.
+  Future<void> applyDayStart(List<DayStartLine> lines) async {
+    _snapDate = _dateKey(DateTime.now());
+    for (final l in lines) {
+      _snapAvail[l.account.id!] = l.recalculated;
+    }
+    _saveSnapshot();
+    notifyListeners();
   }
 
   /// Wakes up just after midnight (if the app is open) so the limit renews

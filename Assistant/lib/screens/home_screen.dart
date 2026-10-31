@@ -13,6 +13,7 @@ import '../providers/app_state.dart';
 import '../utils/format.dart';
 import '../widgets/account_card.dart';
 import '../widgets/common.dart';
+import '../widgets/daily_limit_details.dart';
 import 'category_chart_page.dart';
 import 'finance/account_detail.dart';
 import 'finance/transaction_form.dart';
@@ -253,20 +254,36 @@ class _DailyLimitCard extends StatelessWidget {
     final net = receivedToday - spentToday;
 
     /// small label + value cell used in the second row
-    Widget mini(String label, String value, {Color? valueColor}) => Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10, color: fg.withValues(alpha: .75))),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(value,
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500, color: valueColor ?? fg)),
-            ),
-          ]),
+    Widget mini(String label, String value,
+            {Color? valueColor, VoidCallback? onTap}) =>
+        Expanded(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: onTap,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Flexible(
+                  child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10, color: fg.withValues(alpha: .75))),
+                ),
+                // info icon: "tap to see the calculation / recalculate"
+                if (onTap != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 3),
+                    child: Icon(Icons.info_outline, size: 11, color: fg.withValues(alpha: .75)),
+                  ),
+              ]),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(value,
+                    style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w500, color: valueColor ?? fg)),
+              ),
+            ]),
+          ),
         );
 
     return Card(
@@ -308,7 +325,8 @@ class _DailyLimitCard extends StatelessWidget {
           const SizedBox(height: 6),
           Row(children: [
             mini('Day-start limit', '${formatInr(originalPerDay, hidden: hidden)} / day',
-                valueColor: sign(originalPerDay)),
+                valueColor: sign(originalPerDay),
+                onTap: () => showDailyLimitDetails(context, hidden: hidden)),
             mini('Spent today', formatInr(spentToday, hidden: hidden),
                 valueColor: sign(-spentToday)),
             mini('Received today', formatInr(receivedToday, hidden: hidden),

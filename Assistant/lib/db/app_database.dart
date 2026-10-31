@@ -353,12 +353,19 @@ class AppDatabase {
   Future<List<Account>> getAccounts() async => _accounts(await db);
 
   /// Sums every account's transactions in one query: accountId -> [Ledger].
-  Future<Map<int, Ledger>> _ledgers(DatabaseExecutor e) async {
+  ///
+  /// With [actualBeforeMs] only ACTUAL transactions dated before that moment
+  /// are counted (scheduled ones are always counted): the balance as it was
+  /// at that moment, judged by transaction DATE.
+  Future<Map<int, Ledger>> _ledgers(DatabaseExecutor e,
+      {int? actualBeforeMs}) async {
     final rows = await e.rawQuery(
         'SELECT account_id, status, '
         'SUM(CASE WHEN amount<0 THEN amount ELSE 0 END) AS neg, '
         'SUM(CASE WHEN amount>0 THEN amount ELSE 0 END) AS pos '
-        'FROM transactions GROUP BY account_id, status');
+        'FROM transactions '
+        "${actualBeforeMs == null ? '' : "WHERE status='scheduled' OR date_time < $actualBeforeMs "}"
+        'GROUP BY account_id, status');
     final map = <int, Ledger>{};
     for (final r in rows) {
       final l = map.putIfAbsent(r['account_id'] as int, () => Ledger());
@@ -373,6 +380,11 @@ class AppDatabase {
     }
     return map;
   }
+
+  /// Ledgers as they were at [dayStart]: actual transactions dated before it
+  /// plus all scheduled ones. Used to recalculate the daily limit of a day.
+  Future<Map<int, Ledger>> ledgersAsOf(DateTime dayStart) async =>
+      _ledgers(await db, actualBeforeMs: dayStart.millisecondsSinceEpoch);
 
   /// Builds the account list (depth-first tree order) with calculated balances.
   ///
