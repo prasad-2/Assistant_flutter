@@ -187,26 +187,29 @@ class _ClockCardState extends State<_ClockCard> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final style = TextStyle(
+        color: cs.onPrimaryContainer,
+        fontWeight: FontWeight.w600,
+        fontSize: 13,
+        fontFeatures: const [FontFeature.tabularFigures()]);
+
+    /// one clock part; scales down on very narrow screens
+    Widget part(String text, Alignment align) => Align(
+          alignment: align,
+          child: FittedBox(
+              fit: BoxFit.scaleDown, child: Text(text, style: style)),
+        );
+
+    // date on the left, day in the middle, time on the right (no icon)
     return Card(
       color: cs.primaryContainer,
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.access_time, size: 16, color: cs.onPrimaryContainer),
-          const SizedBox(width: 8),
-          // day name + date + running time; scales down on narrow screens
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(fmtClock.format(_now),
-                  style: TextStyle(
-                      color: cs.onPrimaryContainer,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      fontFeatures: const [FontFeature.tabularFigures()])),
-            ),
-          ),
+        child: Row(children: [
+          Expanded(child: part(fmtClockDate.format(_now), Alignment.centerLeft)),
+          Expanded(child: part(fmtClockDay.format(_now), Alignment.center)),
+          Expanded(child: part(fmtClockTime.format(_now), Alignment.centerRight)),
         ]),
       ),
     );

@@ -16,7 +16,7 @@ import 'account_avatar.dart';
 import 'common.dart';
 
 /// Which card value was tapped.
-enum BreakdownKind { actual, scheduledIn, scheduledOut, summary, available }
+enum BreakdownKind { actual, scheduledIn, scheduledOut, summary, available, totalSpend }
 
 Future<void> showAccountBreakdown(
     BuildContext context, AccountSummary summary, BreakdownKind kind,
@@ -298,11 +298,45 @@ class _BreakdownSheetState extends State<_BreakdownSheet> {
     ];
   }
 
+  /// TOTAL SPEND (credit accounts) = credit limit − ACTUAL value.
+  /// Scheduled transactions are deliberately ignored.
+  List<Widget> _totalSpend(List<_Group> g) {
+    final s = widget.summary;
+    final a = s.account;
+    final spend = a.creditLimit > s.actual ? a.creditLimit - s.actual : 0;
+    final outAll = g.fold<int>(0, (x, e) => x + e.actualOut);
+    final inAll = g.fold<int>(0, (x, e) => x + e.actualIn);
+    return [
+      _heading('Calculation'),
+      _line('Credit limit', a.creditLimit, op: ' '),
+      _line('Actual value', s.actual,
+          op: '−', note: 'actual transactions (this + child accounts) + credit limit'),
+      const Divider(),
+      _line('Total spend', spend, op: '=', total: true, color: debitColor(context)),
+      _heading('Same amount from the transactions'),
+      _line('Debits (money spent)', outAll, op: ' ', color: debitColor(context)),
+      _line('Credits (repayments / refunds)', inAll, op: '−', color: creditColor(context)),
+      const Divider(),
+      _line('Spent, net', outAll - inAll, op: '=', total: true,
+          color: outAll - inAll > 0 ? debitColor(context) : null,
+          note: 'scheduled transactions are not counted'),
+      _heading('Responsible transactions'),
+      for (final x in g)
+        if (x.actual.isNotEmpty || x.depth == 0)
+          _expansion(x.account.name, x.depth == 0 ? 'this account' : 'child account',
+              x.actualNet, x.actual, open: x.depth == 0, indent: x.depth),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.summary;
     final a = s.account;
     final (title, value) = switch (widget.kind) {
+      BreakdownKind.totalSpend => (
+          'Total spend',
+          a.creditLimit > s.actual ? a.creditLimit - s.actual : 0
+        ),
       BreakdownKind.actual => ('Actual', s.actual),
       BreakdownKind.scheduledIn => ('Scheduled in', s.scheduledIn),
       BreakdownKind.scheduledOut => ('Scheduled out', s.scheduledOut),
@@ -337,7 +371,8 @@ class _BreakdownSheetState extends State<_BreakdownSheet> {
                 style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
-                    color: widget.kind == BreakdownKind.scheduledOut
+                    color: (widget.kind == BreakdownKind.scheduledOut ||
+                            widget.kind == BreakdownKind.totalSpend)
                         ? (widget.hidden || value == 0 ? null : debitColor(context))
                         : _sign(value))),
           ]),
@@ -355,6 +390,7 @@ class _BreakdownSheetState extends State<_BreakdownSheet> {
                     BreakdownKind.scheduledOut => _schedOut(groups.first),
                     BreakdownKind.summary => _summary(groups),
                     BreakdownKind.available => _available(groups.first),
+                    BreakdownKind.totalSpend => _totalSpend(groups),
                   },
                 ),
         ),

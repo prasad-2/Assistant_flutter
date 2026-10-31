@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../../utils/format.dart';
+import '../../widgets/account_breakdown.dart';
 import '../../widgets/account_card.dart';
 import '../../widgets/common.dart';
 import 'account_actions.dart';
@@ -94,6 +95,9 @@ class AccountDetailPage extends StatelessWidget {
                         formatInr(a.creditLimit, hidden: s.isHidden(a.id!))),
                     // total spend = credit limit - ACTUAL value (scheduled ignored)
                     _row(
+                        onTap: () => showAccountBreakdown(
+                            context, sum, BreakdownKind.totalSpend,
+                            hidden: s.isHidden(a.id!)),
                         Icons.shopping_bag_outlined,
                         'Total spend',
                         formatInr(
@@ -152,8 +156,11 @@ class AccountDetailPage extends StatelessWidget {
     );
   }
 
-  Widget _row(IconData icon, String k, String v) => ListTile(
+  Widget _row(IconData icon, String k, String v, {VoidCallback? onTap}) => ListTile(
         dense: true,
+        onTap: onTap,
+        // info icon = "tap to see how this value is calculated"
+        trailing: onTap == null ? null : const Icon(Icons.info_outline, size: 18),
         leading: Icon(icon, size: 20),
         title: Text(k, style: const TextStyle(fontSize: 12)),
         subtitle: Text(v, style: const TextStyle(fontSize: 15)),

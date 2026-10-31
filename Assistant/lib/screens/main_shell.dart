@@ -2,6 +2,10 @@
 // IndexedStack keeps each tab alive so scroll positions / state are preserved.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+
+import '../providers/app_state.dart';
+import 'lock_screen.dart';
 
 import 'finance/finance_screen.dart';
 import 'home_screen.dart';
@@ -16,6 +20,30 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _i = 0; // selected tab (0 = Home); the app still starts on Home
+
+  /// Finance lock: becomes true when the user authenticates for the Finance
+  /// section and STAYS true until the app is closed. Because it lives only in
+  /// this State, closing the app and opening it again asks once more.
+  bool _financeUnlocked = false;
+
+  /// Bottom navigation.
+  void _select(int v) => setState(() => _i = v);
+
+  /// The Finance tab. When the finance lock is enabled and the user has not
+  /// authenticated yet, an inline lock screen replaces the section. It is only
+  /// created while the tab is selected (no hidden prompts at app start).
+  Widget _financeTab() {
+    final auth = context.read<AppState>().financeAuth;
+    if (!auth.enabled || _financeUnlocked) return const FinanceScreen();
+    if (_i != 1) return const SizedBox.shrink();
+    return LockScreen(
+      auth: auth,
+      title: 'Finance is locked',
+      reason: 'Unlock Finance',
+      autoPrompt: false,
+      onUnlocked: () => setState(() => _financeUnlocked = true),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,14 +72,14 @@ class _MainShellState extends State<MainShell> {
       },
       child: Scaffold(
       body: IndexedStack(index: _i, children: [
-        HomeScreen(onSeeAllTodos: () => setState(() => _i = 2)),
-        const FinanceScreen(),
+        HomeScreen(onSeeAllTodos: () => _select(2)),
+        _financeTab(),
         const TodoScreen(),
         const SettingsScreen(),
       ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _i,
-        onDestinationSelected: (v) => setState(() => _i = v),
+        onDestinationSelected: _select,
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.home_outlined),

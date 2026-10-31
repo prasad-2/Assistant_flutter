@@ -323,7 +323,8 @@ class AccountCard extends StatelessWidget {
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _cell(context, 'Credit limit', formatInr(a.creditLimit, hidden: hidden)),
             _cell(context, 'Total spend', formatInr(totalSpend, hidden: hidden),
-                color: (!hidden && totalSpend > 0) ? debitColor(context) : null),
+                color: (!hidden && totalSpend > 0) ? debitColor(context) : null,
+                onTap: () => _explain(context, BreakdownKind.totalSpend)),
             const Spacer(flex: 2),
           ]),
         ],

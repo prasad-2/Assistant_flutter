@@ -51,7 +51,9 @@ class AppState extends ChangeNotifier {
   static const int kDefaultSeed = 0xFF009688;
 
   final SharedPreferences prefs;
-  final AuthService auth;
+  final AuthService auth; // app lock
+  late final AuthService financeAuth = // separate lock for the Finance section
+      AuthService(prefs, prefix: 'fin_lock');
   final AppDatabase _db = AppDatabase.instance;
 
   ThemeMode themeMode = ThemeMode.system;

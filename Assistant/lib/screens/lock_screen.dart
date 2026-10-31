@@ -8,11 +8,21 @@ class LockScreen extends StatefulWidget {
   final AuthService auth;
   final VoidCallback onUnlocked; // called after successful authentication
   final bool cancellable; // true when pushed as a route (backup, settings)
+  final String? title; // default: "<app> is locked"
+  final String? reason; // text of the system biometric prompt
+
+  /// Show the system biometric prompt automatically when the screen appears.
+  /// The inline Finance lock turns this off (the user taps "Authenticate"),
+  /// so it never competes with the app lock's own prompt.
+  final bool autoPrompt;
   const LockScreen(
       {super.key,
       required this.auth,
       required this.onUnlocked,
-      this.cancellable = false});
+      this.cancellable = false,
+      this.title,
+      this.reason,
+      this.autoPrompt = true});
 
   @override
   State<LockScreen> createState() => _LockScreenState();
@@ -47,14 +57,14 @@ class _LockScreenState extends State<LockScreen> {
         widget.onUnlocked();
         return;
       }
-      _deviceAuth(); // device method: prompt immediately
-    } else if (_showBiometricShortcut) {
+      if (widget.autoPrompt) _deviceAuth(); // device method: prompt at once
+    } else if (_showBiometricShortcut && widget.autoPrompt) {
       _deviceAuth(); // password + biometrics: try the shortcut first
     }
   }
 
   Future<void> _deviceAuth() async {
-    final ok = await widget.auth.deviceAuth('Unlock $kAppName');
+    final ok = await widget.auth.deviceAuth(widget.reason ?? 'Unlock $kAppName');
     if (ok && mounted) widget.onUnlocked();
   }
 
@@ -90,7 +100,7 @@ class _LockScreenState extends State<LockScreen> {
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Icon(Icons.lock_outline, size: 72, color: cs.primary),
                   const SizedBox(height: 16),
-                  Text('$kAppName is locked',
+                  Text(widget.title ?? '$kAppName is locked',
                       style: Theme.of(context).textTheme.headlineSmall),
                   const SizedBox(height: 24),
                   if (_usePassword) ...[
@@ -143,12 +153,14 @@ class _LockScreenState extends State<LockScreen> {
 
 /// Asks for authentication before a sensitive action (backup, restore,
 /// changing lock settings). Returns true at once when the lock is disabled.
-Future<bool> requireAuth(BuildContext context, AuthService auth) async {
+Future<bool> requireAuth(BuildContext context, AuthService auth,
+    {String? title}) async {
   if (!auth.enabled) return true;
   final ok = await Navigator.of(context).push<bool>(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (ctx) => LockScreen(
       auth: auth,
+      title: title,
       cancellable: true,
       onUnlocked: () => Navigator.of(ctx).pop(true),
     ),

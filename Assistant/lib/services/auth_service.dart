@@ -35,24 +35,31 @@ class LockGuard {
 ///   * `device`   – system biometrics / face / phone PIN, pattern, password
 ///   * `password` – app PIN/password, with the biometric prompt as a shortcut
 ///   * `pin_only` – app PIN/password ONLY (system biometrics never used)
+///
+/// The same class also powers the separate FINANCE lock: it is created with
+/// another [prefix] ('fin_lock'), so its settings and its PIN / password are
+/// stored under different keys and are independent from the app lock.
 class AuthService {
-  AuthService(this.prefs);
+  AuthService(this.prefs, {this.prefix = 'lock'});
   final SharedPreferences prefs;
+
+  /// Key prefix: 'lock' = app lock, 'fin_lock' = finance lock.
+  final String prefix;
   final LocalAuthentication _la = LocalAuthentication();
 
-  bool get enabled => prefs.getBool('lock_enabled') ?? false;
-  String get method => prefs.getString('lock_method') ?? 'device';
+  bool get enabled => prefs.getBool('${prefix}_enabled') ?? false;
+  String get method => prefs.getString('${prefix}_method') ?? 'device';
 
   /// True for both methods that use the app's own PIN / password.
   bool get usesPassword => method == 'password' || method == 'pin_only';
-  bool get hasPassword => prefs.getString('lock_hash') != null;
+  bool get hasPassword => prefs.getString('${prefix}_hash') != null;
 
   /// How long the app may stay in the background before it locks again.
-  Duration get lockDelay => Duration(seconds: prefs.getInt('lock_delay') ?? 0);
+  Duration get lockDelay => Duration(seconds: prefs.getInt('${prefix}_delay') ?? 0);
 
-  Future<void> setEnabled(bool v) => prefs.setBool('lock_enabled', v);
-  Future<void> setMethod(String m) => prefs.setString('lock_method', m);
-  Future<void> setLockDelaySeconds(int s) => prefs.setInt('lock_delay', s);
+  Future<void> setEnabled(bool v) => prefs.setBool('${prefix}_enabled', v);
+  Future<void> setMethod(String m) => prefs.setString('${prefix}_method', m);
+  Future<void> setLockDelaySeconds(int s) => prefs.setInt('${prefix}_delay', s);
 
   /// Whether the phone has a screen lock / biometric that can be used.
   Future<bool> deviceSupported() async {
@@ -86,13 +93,13 @@ class AuthService {
     final rnd = Random.secure();
     final salt =
         base64Url.encode(List<int>.generate(16, (_) => rnd.nextInt(256)));
-    await prefs.setString('lock_salt', salt);
-    await prefs.setString('lock_hash', _hash(salt, pw));
+    await prefs.setString('${prefix}_salt', salt);
+    await prefs.setString('${prefix}_hash', _hash(salt, pw));
   }
 
   bool verifyPassword(String pw) {
-    final salt = prefs.getString('lock_salt');
-    final h = prefs.getString('lock_hash');
+    final salt = prefs.getString('${prefix}_salt');
+    final h = prefs.getString('${prefix}_hash');
     if (salt == null || h == null) return false;
     return _hash(salt, pw) == h;
   }

@@ -15,6 +15,7 @@ import '../../widgets/common.dart';
 import '../lock_screen.dart';
 import 'backup_schedule_screen.dart';
 import 'categories_screen.dart';
+import 'finance_lock_screen.dart';
 import 'security_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -218,6 +219,26 @@ class SettingsScreen extends StatelessWidget {
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => const SecurityScreen())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.account_balance_wallet_outlined),
+          title: const Text('Finance lock'),
+          subtitle: Text(!s.financeAuth.enabled
+              ? 'Off'
+              : s.financeAuth.method == 'device'
+                  ? 'On – biometrics / device lock'
+                  : 'On – separate PIN / password'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () async {
+            // opening these settings needs the finance lock itself (if on)
+            if (!await requireAuth(context, s.financeAuth, title: 'Finance lock')) {
+              return;
+            }
+            if (context.mounted) {
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const FinanceLockScreen()));
+            }
+          },
         ),
         SwitchListTile(
           secondary: const Icon(Icons.visibility_off_outlined),
