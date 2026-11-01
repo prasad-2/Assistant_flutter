@@ -217,18 +217,18 @@ class _ClockCardState extends State<_ClockCard> {
   }
 }
 
-/// "Daily limit" card (positive values green, negative red).
-///   * current limit  = available balance of the regular accounts / days left
-///     (changes with every transaction)
-///   * day-start limit = the same calculation with the balance at 12 am today
-///     (fixed for the whole day, renews every midnight)
-///   * spent / received today = actual debits / credits of the regular
-///     accounts dated today
+/// "Daily limit" card, laid out on several lines:
+///   1. current daily limit (changes with every transaction) + how it is made
+///   2. a PROGRESS BAR of today's spending against the day-start limit
+///      (spent / day-start limit) with spent and remaining under it
+///   3. two small rows of values: day-start limit | remaining,
+///      received today | today's summary
+/// Positive values are green, negative values red.
 class _DailyLimitCard extends StatelessWidget {
   final int available; // sum of regular accounts' available balance now
   final int daysLeft;
   final int perDay; // current daily limit
-  final int originalPerDay; // limit at the start of the day
+  final int originalPerDay; // limit at the start of the day (fixed all day)
   final int spentToday;
   final int receivedToday;
   final bool hidden;
@@ -245,46 +245,63 @@ class _DailyLimitCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final fg = cs.onSecondaryContainer;
-    // Colours by sign: positive = green, negative = red, zero / hidden = normal.
+    String m(int v) => formatInr(v, hidden: hidden);
+
+    // positive = green, negative = red, zero / hidden = normal
     Color? sign(int v) => hidden || v == 0
         ? null
         : (v > 0 ? creditColor(context) : debitColor(context));
-    final color = sign(perDay) ?? fg;
-    // summary of today = received - spent (spent counts as negative)
-    final net = receivedToday - spentToday;
-    // what is left of today's day-start limit after today's spending
-    final remaining = originalPerDay - spentToday;
 
-    /// small label + value cell used in the second row
-    Widget mini(String label, String value,
-            {Color? valueColor, VoidCallback? onTap}) =>
+    final net = receivedToday - spentToday; // today's summary
+    final remaining = originalPerDay - spentToday; // left of the day's limit
+    final over = spentToday > 0 && remaining < 0;
+
+    // progress = spent / day-start limit (full when there is no limit left)
+    final ratio = originalPerDay > 0
+        ? (spentToday / originalPerDay).clamp(0.0, 1.0)
+        : (spentToday > 0 ? 1.0 : 0.0);
+    final barColor = over || originalPerDay <= 0 && spentToday > 0
+        ? debitColor(context)
+        : (ratio >= .8 ? Colors.orange : creditColor(context));
+
+    /// label above value; [end] right-aligns the cell
+    Widget cell(String label, String value,
+            {Color? color, bool end = false, VoidCallback? onTap}) =>
         Expanded(
           child: InkWell(
             borderRadius: BorderRadius.circular(6),
             onTap: onTap,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Flexible(
-                  child: Text(label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10, color: fg.withValues(alpha: .75))),
-                ),
-                // info icon: "tap to see the calculation / recalculate"
-                if (onTap != null)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 3),
-                    child: Icon(Icons.info_outline, size: 11, color: fg.withValues(alpha: .75)),
-                  ),
-              ]),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(value,
-                    style: TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w500, color: valueColor ?? fg)),
-              ),
-            ]),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Column(
+                  crossAxisAlignment:
+                      end ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(label,
+                              style: TextStyle(
+                                  fontSize: 11, color: fg.withValues(alpha: .75))),
+                          // info icon: tap to see the calculation / recalculate
+                          if (onTap != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 3),
+                              child: Icon(Icons.info_outline,
+                                  size: 12, color: fg.withValues(alpha: .75)),
+                            ),
+                        ]),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: end ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Text(value,
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              color: color ?? fg)),
+                    ),
+                  ]),
+            ),
           ),
         );
 
@@ -292,20 +309,23 @@ class _DailyLimitCard extends StatelessWidget {
       margin: EdgeInsets.zero,
       color: cs.secondaryContainer,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        child: Column(children: [
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // ── 1. current limit ──
           Row(children: [
             Icon(Icons.speed, color: fg),
             const SizedBox(width: 10),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Daily limit',
-                    style: TextStyle(fontSize: 12, color: fg.withValues(alpha: .8))),
-                Text(
-                    '${formatInr(available, hidden: hidden)}  ÷  $daysLeft day${daysLeft == 1 ? '' : 's'} left',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: fg.withValues(alpha: .9))),
+                Text('${m(available)}  ÷  $daysLeft day${daysLeft == 1 ? '' : 's'} left',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: fg.withValues(alpha: .8))),
+                    style: TextStyle(fontSize: 11, color: fg.withValues(alpha: .75))),
               ]),
             ),
             const SizedBox(width: 8),
@@ -314,7 +334,7 @@ class _DailyLimitCard extends StatelessWidget {
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerRight,
-                child: Text('${formatInr(perDay, hidden: hidden)} / day',
+                child: Text('${m(perDay)} / day',
                     style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w500,
@@ -322,21 +342,80 @@ class _DailyLimitCard extends StatelessWidget {
               ),
             ),
           ]),
-          const SizedBox(height: 6),
-          Divider(height: 1, color: fg.withValues(alpha: .2)),
+          const SizedBox(height: 12),
+
+          // ── 2. progress bar: spent against the day-start limit ──
+          Row(children: [
+            Text("Today's usage",
+                style: TextStyle(fontSize: 11, color: fg.withValues(alpha: .75))),
+            const Spacer(),
+            if (!hidden)
+              Text(
+                  originalPerDay > 0
+                      ? '${(spentToday / originalPerDay * 100).round()}% used'
+                      : (spentToday > 0 ? 'no limit left' : '0% used'),
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: over ? debitColor(context) : fg.withValues(alpha: .85))),
+          ]),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 10,
+              color: barColor,
+              backgroundColor: fg.withValues(alpha: .15),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(children: [
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text('Spent ${m(spentToday)}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: (!hidden && spentToday > 0)
+                            ? debitColor(context)
+                            : fg)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                    over ? 'Over by ${m(-remaining)}' : 'Left ${m(remaining)}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: sign(remaining) ?? fg)),
+              ),
+            ),
+          ]),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Divider(height: 1, color: fg.withValues(alpha: .2)),
+          ),
+
+          // ── 3. the figures, two per line ──
+          Row(children: [
+            cell('Day-start limit', '${m(originalPerDay)} / day',
+                color: sign(originalPerDay),
+                onTap: () => showDailyLimitDetails(context, hidden: hidden)),
+            const SizedBox(width: 12),
+            cell('Remaining today', m(remaining), color: sign(remaining), end: true),
+          ]),
           const SizedBox(height: 6),
           Row(children: [
-            mini('Day-start limit', '${formatInr(originalPerDay, hidden: hidden)} / day',
-                valueColor: sign(originalPerDay),
-                onTap: () => showDailyLimitDetails(context, hidden: hidden)),
-            mini('Spent today', formatInr(spentToday, hidden: hidden),
-                valueColor: sign(-spentToday)),
-            // remaining = day-start limit - spent today (green when left, red when over)
-            mini('Remaining', formatInr(remaining, hidden: hidden),
-                valueColor: sign(remaining)),
-            mini('Received today', formatInr(receivedToday, hidden: hidden),
-                valueColor: sign(receivedToday)),
-            mini('Summary', formatInr(net, hidden: hidden), valueColor: sign(net)),
+            cell('Received today', m(receivedToday), color: sign(receivedToday)),
+            const SizedBox(width: 12),
+            cell('Today summary', m(net), color: sign(net), end: true),
           ]),
         ]),
       ),
