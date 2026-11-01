@@ -252,6 +252,8 @@ class _DailyLimitCard extends StatelessWidget {
     final color = sign(perDay) ?? fg;
     // summary of today = received - spent (spent counts as negative)
     final net = receivedToday - spentToday;
+    // what is left of today's day-start limit after today's spending
+    final remaining = originalPerDay - spentToday;
 
     /// small label + value cell used in the second row
     Widget mini(String label, String value,
@@ -329,6 +331,9 @@ class _DailyLimitCard extends StatelessWidget {
                 onTap: () => showDailyLimitDetails(context, hidden: hidden)),
             mini('Spent today', formatInr(spentToday, hidden: hidden),
                 valueColor: sign(-spentToday)),
+            // remaining = day-start limit - spent today (green when left, red when over)
+            mini('Remaining', formatInr(remaining, hidden: hidden),
+                valueColor: sign(remaining)),
             mini('Received today', formatInr(receivedToday, hidden: hidden),
                 valueColor: sign(receivedToday)),
             mini('Summary', formatInr(net, hidden: hidden), valueColor: sign(net)),
