@@ -882,42 +882,61 @@ class AppDatabase {
   Future<int> addTransaction(TxnInput i) async {
     final d = await db;
     return d.transaction((t) async {
-      var firstId = 0;
-      final cat = await _category(t, i.categoryId);
-      _checkInput(i, cat);
-      if (cat.isRepayment) await _checkRepayment(t, i);
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final sched = i.status == 'scheduled';
+      final id = await _insertTxn(t, i);
+      await _validate(t);
+      return id;
+    });
+  }
 
-      // Builds one row. Scheduled rows remember their original plan.
-      Map<String, Object?> row(int acc, int amt, String? group) => {
-            'account_id': acc,
-            'category_id': i.categoryId,
-            'description': i.description.trim(),
-            'date_time': i.dateTime.millisecondsSinceEpoch,
-            'amount': amt,
-            'status': i.status,
-            'transfer_group': group,
-            'sched_date_time': sched ? i.dateTime.millisecondsSinceEpoch : null,
-            'sched_description': sched ? i.description.trim() : null,
-            'sched_amount': sched ? amt : null,
-            'completed_at': sched ? null : now,
-            'created_at': now,
-            'updated_at': now,
-          };
-
-      if (cat.isTwoLeg) {
-        final g = '${now}_${Random().nextInt(1 << 30)}';
-        firstId = await t.insert('transactions', row(i.accountId, -i.amountPaise, g));
-        await t.insert('transactions', row(i.toAccountId!, i.amountPaise, g));
-      } else {
-        // sign comes from the category type: credit adds, deduct subtracts
-        final amt = cat.isCredit ? i.amountPaise : -i.amountPaise;
-        firstId = await t.insert('transactions', row(i.accountId, amt, null));
+  /// Adds several transactions in ONE database transaction: either all of
+  /// them are saved or (when a balance rule fails) none. Used by "Distribute".
+  Future<void> addTransactions(List<TxnInput> inputs) async {
+    final d = await db;
+    await d.transaction((t) async {
+      for (final i in inputs) {
+        await _insertTxn(t, i);
       }
       await _validate(t);
-      return firstId;
     });
+  }
+
+  /// Inserts one transaction (two linked rows for self transfer / repayment)
+  /// WITHOUT validating balances; callers validate afterwards.
+  Future<int> _insertTxn(DatabaseExecutor t, TxnInput i) async {
+    var firstId = 0;
+    final cat = await _category(t, i.categoryId);
+    _checkInput(i, cat);
+    if (cat.isRepayment) await _checkRepayment(t, i);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final sched = i.status == 'scheduled';
+
+    // Builds one row. Scheduled rows remember their original plan.
+    Map<String, Object?> row(int acc, int amt, String? group) => {
+          'account_id': acc,
+          'category_id': i.categoryId,
+          'description': i.description.trim(),
+          'date_time': i.dateTime.millisecondsSinceEpoch,
+          'amount': amt,
+          'status': i.status,
+          'transfer_group': group,
+          'sched_date_time': sched ? i.dateTime.millisecondsSinceEpoch : null,
+          'sched_description': sched ? i.description.trim() : null,
+          'sched_amount': sched ? amt : null,
+          'completed_at': sched ? null : now,
+          'created_at': now,
+          'updated_at': now,
+        };
+
+    if (cat.isTwoLeg) {
+      final g = '${now}_${Random().nextInt(1 << 30)}';
+      firstId = await t.insert('transactions', row(i.accountId, -i.amountPaise, g));
+      await t.insert('transactions', row(i.toAccountId!, i.amountPaise, g));
+    } else {
+      // sign comes from the category type: credit adds, deduct subtracts
+      final amt = cat.isCredit ? i.amountPaise : -i.amountPaise;
+      firstId = await t.insert('transactions', row(i.accountId, amt, null));
+    }
+    return firstId;
   }
 
   /// Updates a transaction (both legs for a self transfer).

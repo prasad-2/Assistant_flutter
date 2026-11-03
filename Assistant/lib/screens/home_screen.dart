@@ -64,52 +64,35 @@ class HomeScreen extends StatelessWidget {
                 receivedToday: s.todayIn,
                 hidden: s.hideBalances),
           ],
-          const SizedBox(height: 10),
-          // quick actions
+          const SizedBox(height: 6),
+          // section header: the three big buttons were replaced by small
+          // icons here (add transaction, scheduled transactions)
           Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.add),
-                label: const FittedBox(child: Text('Transaction')),
-                onPressed: () {
-                  if (s.accounts.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Add a bank account in the Finance tab first.')));
-                    return;
-                  }
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const TransactionFormPage()));
-                },
-              ),
+            Expanded(child: Text('Regular accounts', style: tt)),
+            IconButton(
+              tooltip: 'Add transaction',
+              icon: const Icon(Icons.add_circle_outline),
+              onPressed: () {
+                if (s.accounts.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Add a bank account in the Finance tab first.')));
+                  return;
+                }
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const TransactionFormPage()));
+              },
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.schedule),
-                label: const FittedBox(child: Text('Scheduled')),
-                onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const TransactionsPage(
-                            title: 'Scheduled transactions',
-                            initial: TxnFilter(status: 'scheduled')))),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.pie_chart_outline),
-                label: const FittedBox(child: Text('Charts')),
-                onPressed: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const CategoryChartPage())),
-              ),
+            IconButton(
+              tooltip: 'Scheduled transactions',
+              icon: const Icon(Icons.schedule),
+              onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const TransactionsPage(
+                          title: 'Scheduled transactions',
+                          initial: TxnFilter(status: 'scheduled')))),
             ),
           ]),
-          const SizedBox(height: 12),
-          Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Regular accounts', style: tt)),
-          const SizedBox(height: 6),
           // ── scrollable area 1: regular accounts (compact cards) ──
           if (regular.isEmpty)
             const Padding(

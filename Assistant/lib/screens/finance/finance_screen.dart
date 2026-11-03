@@ -10,6 +10,7 @@ import '../../widgets/common.dart';
 import 'account_actions.dart';
 import 'account_detail.dart';
 import 'debts_view.dart';
+import 'distribute_screen.dart';
 import 'loan_form.dart';
 import 'loans_view.dart';
 import 'transaction_form.dart';
@@ -53,6 +54,16 @@ class _FinanceScreenState extends State<FinanceScreen>
             onTap: () {
               Navigator.pop(ctx);
               AccountActions.openForm(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.call_split),
+            title: const Text('Distribute balance'),
+            subtitle: const Text('Split an amount between accounts (self transfers)'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const DistributeScreen()));
             },
           ),
           ListTile(
@@ -226,6 +237,13 @@ class _FinanceScreenState extends State<FinanceScreen>
       appBar: AppBar(
         title: const Text('Finance'),
         actions: [
+          if (_tab.index <= 2) // Accounts, Credit and Transactions tabs
+            IconButton(
+              tooltip: 'Distribute balance',
+              icon: const Icon(Icons.call_split),
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const DistributeScreen())),
+            ),
           if (_tab.index <= 1) // Accounts and Credit tabs
             IconButton(
               tooltip: _reorder ? 'Done reordering' : 'Reorder accounts',
