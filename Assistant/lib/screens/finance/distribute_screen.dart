@@ -10,12 +10,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../db/app_database.dart';
+import '../../models/distribution_models.dart';
 import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../../utils/format.dart';
 import '../../widgets/calculator.dart';
 import '../../widgets/common.dart';
 import '../../widgets/form_widgets.dart';
+import 'distribution_history_screen.dart';
 
 /// One "to account" line.
 class _Line {
@@ -250,8 +252,27 @@ class _DistributeScreenState extends State<DistributeScreen> {
 
     setState(() => _saving = true);
     try {
-      // all transfers are saved together, or none when a balance rule fails
-      await AppDatabase.instance.addTransactions(inputs);
+      // transfers + history record are saved together, or none when a
+      // balance rule fails
+      await AppDatabase.instance.saveDistribution(
+        Distribution(
+          fromAccountId: _from,
+          fromName: fromAcc.name,
+          dateTime: when.dateTime,
+          status: when.status,
+          total: total,
+          lines: [
+            for (var i = 0; i < _lines.length; i++)
+              DistributionLine(
+                toAccountId: _lines[i].account,
+                toName: st.accounts.firstWhere((a) => a.id == _lines[i].account).name,
+                pct: _pct(_lines[i].pct),
+                amount: values[i],
+              )
+          ],
+        ),
+        inputs,
+      );
       await st.refreshFinance();
       if (mounted) {
         snack(context, '${inputs.length} self transfer${inputs.length == 1 ? '' : 's'} created');
@@ -322,7 +343,17 @@ class _DistributeScreenState extends State<DistributeScreen> {
     final free = _free(st);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Distribute balance')),
+      appBar: AppBar(
+        title: const Text('Distribute balance'),
+        actions: [
+          IconButton(
+            tooltip: 'Distribution history',
+            icon: const Icon(Icons.history),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const DistributionHistoryScreen())),
+          ),
+        ],
+      ),
       body: st.accounts.length < 2
           ? const Center(
               child: Padding(

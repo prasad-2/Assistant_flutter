@@ -18,6 +18,7 @@ import 'dart:typed_data';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../models/distribution_models.dart';
 import '../models/models.dart';
 
 /// Funds-block behaviour: scheduled DEBITS always reduce the available balance.
@@ -51,7 +52,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const _fileName = 'finance_todo.db';
-  static const _version = 6;
+  static const _version = 7;
 
   /// Shared open-future so concurrent callers never open the file twice.
   Future<Database>? _opening;
@@ -175,10 +176,31 @@ class AppDatabase {
 
     await _createSettingsTable(d);
     await _createLoanDebtTables(d);
+    await _createDistributionTables(d);
 
     for (final s in _seedCategories) {
       await d.insert('categories', {'name': s[0], 'type': s[1], 'icon': s[2]});
     }
+  }
+
+  /// History of "Distribute balance" operations (added in schema v7).
+  Future<void> _createDistributionTables(Database d) async {
+    await d.execute('''CREATE TABLE IF NOT EXISTS distributions(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_account_id INTEGER,
+      from_name TEXT NOT NULL,
+      date_time INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      total INTEGER NOT NULL,
+      created_at INTEGER NOT NULL)''');
+    await d.execute('''CREATE TABLE IF NOT EXISTS distribution_lines(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distribution_id INTEGER NOT NULL,
+      to_account_id INTEGER,
+      to_name TEXT NOT NULL,
+      pct REAL NOT NULL,
+      amount INTEGER NOT NULL,
+      txn_id INTEGER)''');
   }
 
   /// Loan management + debt management tables (added in schema v5).
@@ -240,6 +262,7 @@ class AppDatabase {
   ///   v3 -> v4: built-in "Credit Bill Repayment" category.
   ///   v4 -> v5: loans, loan EMIs, debts + Emi Payment / Debt categories.
   ///   v5 -> v6: accounts.sort_order (user defined card order).
+  ///   v6 -> v7: distribution history tables.
   Future<void> _upgrade(Database d, int oldV, int newV) async {
     if (oldV < 2) {
       await d.execute('ALTER TABLE accounts ADD COLUMN notes TEXT');
@@ -270,6 +293,9 @@ class AppDatabase {
           'icon': 'credit_card',
         });
       }
+    }
+    if (oldV < 7) {
+      await _createDistributionTables(d);
     }
     if (oldV < 6) {
       await d.execute(
@@ -318,7 +344,7 @@ class AppDatabase {
   /// Clears loan / debt links that point at bank transactions about to be
   /// deleted (matching `transactions WHERE [where]`).
   Future<void> _unlinkTxns(DatabaseExecutor t, String where, List<Object?> args) async {
-    for (final table in ['debt_entries', 'loan_emis']) {
+    for (final table in ['debt_entries', 'loan_emis', 'distribution_lines']) {
       await t.rawUpdate(
           'UPDATE $table SET txn_id=NULL WHERE txn_id IN (SELECT id FROM transactions WHERE $where)',
           args);
@@ -897,6 +923,78 @@ class AppDatabase {
         await _insertTxn(t, i);
       }
       await _validate(t);
+    });
+  }
+
+  /// Saves a distribution: creates all its self transfers AND the history
+  /// record in ONE database transaction (nothing is saved when a balance
+  /// rule fails). [inputs] and `d.lines` have the same order.
+  Future<int> saveDistribution(Distribution d, List<TxnInput> inputs) async {
+    final database = await db;
+    return database.transaction((t) async {
+      final ids = <int>[];
+      for (final i in inputs) {
+        ids.add(await _insertTxn(t, i));
+      }
+      await _validate(t);
+      final did = await t.insert('distributions', {
+        'from_account_id': d.fromAccountId,
+        'from_name': d.fromName,
+        'date_time': d.dateTime.millisecondsSinceEpoch,
+        'status': d.status,
+        'total': d.total,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      });
+      for (var k = 0; k < d.lines.length; k++) {
+        final l = d.lines[k];
+        await t.insert('distribution_lines', {
+          'distribution_id': did,
+          'to_account_id': l.toAccountId,
+          'to_name': l.toName,
+          'pct': l.pct,
+          'amount': l.amount,
+          'txn_id': ids[k],
+        });
+      }
+      return did;
+    });
+  }
+
+  /// All distributions, newest first, with their lines.
+  Future<List<Distribution>> distributions() async {
+    final database = await db;
+    final heads = await database.query('distributions',
+        orderBy: 'date_time DESC, id DESC');
+    final lines = await database.query('distribution_lines', orderBy: 'id');
+    final byDist = <int, List<DistributionLine>>{};
+    for (final r in lines) {
+      byDist
+          .putIfAbsent(r['distribution_id'] as int, () => [])
+          .add(DistributionLine.fromMap(r));
+    }
+    return [
+      for (final h in heads)
+        Distribution(
+          id: h['id'] as int,
+          fromAccountId: h['from_account_id'] as int?,
+          fromName: h['from_name'] as String,
+          dateTime: DateTime.fromMillisecondsSinceEpoch(h['date_time'] as int),
+          createdAt:
+              DateTime.fromMillisecondsSinceEpoch(h['created_at'] as int),
+          status: h['status'] as String,
+          total: h['total'] as int,
+          lines: byDist[h['id'] as int] ?? const [],
+        )
+    ];
+  }
+
+  /// Deletes only the history record; the transactions stay.
+  Future<void> deleteDistribution(int id) async {
+    final database = await db;
+    await database.transaction((t) async {
+      await t.delete('distribution_lines',
+          where: 'distribution_id=?', whereArgs: [id]);
+      await t.delete('distributions', where: 'id=?', whereArgs: [id]);
     });
   }
 

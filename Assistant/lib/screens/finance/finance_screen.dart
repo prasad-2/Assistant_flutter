@@ -11,6 +11,7 @@ import 'account_actions.dart';
 import 'account_detail.dart';
 import 'debts_view.dart';
 import 'distribute_screen.dart';
+import 'distribution_history_screen.dart';
 import 'loan_form.dart';
 import 'loans_view.dart';
 import 'transaction_form.dart';
@@ -238,11 +239,19 @@ class _FinanceScreenState extends State<FinanceScreen>
         title: const Text('Finance'),
         actions: [
           if (_tab.index <= 2) // Accounts, Credit and Transactions tabs
-            IconButton(
+            PopupMenuButton<String>(
               tooltip: 'Distribute balance',
               icon: const Icon(Icons.call_split),
-              onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const DistributeScreen())),
+              onSelected: (v) => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => v == 'history'
+                          ? const DistributionHistoryScreen()
+                          : const DistributeScreen())),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'new', child: Text('Distribute balance')),
+                PopupMenuItem(value: 'history', child: Text('Distribution history')),
+              ],
             ),
           if (_tab.index <= 1) // Accounts and Credit tabs
             IconButton(
