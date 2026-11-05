@@ -9,6 +9,7 @@ import '../../models/distribution_models.dart';
 import '../../providers/app_state.dart';
 import '../../utils/format.dart';
 import '../../widgets/common.dart';
+import 'distribute_screen.dart';
 
 class DistributionHistoryScreen extends StatefulWidget {
   const DistributionHistoryScreen({super.key});
@@ -111,14 +112,23 @@ class _DistributionHistoryScreenState extends State<DistributionHistoryScreen> {
                                       fontWeight: FontWeight.w500,
                                       color: creditColor(context))),
                             ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
+                          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                            TextButton.icon(
                               onPressed: () => _delete(d),
                               icon: const Icon(Icons.delete_outline, size: 18),
-                              label: const Text('Delete record'),
+                              label: const Text('Delete'),
                             ),
-                          ),
+                            const SizedBox(width: 4),
+                            // opens the Distribute screen with this entry pre-filled
+                            FilledButton.tonalIcon(
+                              onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) => DistributeScreen(repeat: d))),
+                              icon: const Icon(Icons.replay, size: 18),
+                              label: const Text('Repeat'),
+                            ),
+                          ]),
                         ],
                       ),
                     );

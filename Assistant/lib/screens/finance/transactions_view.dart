@@ -33,8 +33,10 @@ class TransactionsPage extends StatelessWidget {
 /// Filterable list of transactions, newest first. Reloads itself whenever
 /// `AppState.financeVersion` changes.
 class TransactionsView extends StatefulWidget {
+  /// By default only ACTUAL (completed) transactions are listed; the filter
+  /// can be changed or cleared with the Filter button.
   final TxnFilter initial;
-  const TransactionsView({super.key, this.initial = const TxnFilter()});
+  const TransactionsView({super.key, this.initial = const TxnFilter(status: 'actual')});
   @override
   State<TransactionsView> createState() => _TransactionsViewState();
 }

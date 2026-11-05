@@ -25,12 +25,39 @@ class HomeScreen extends StatelessWidget {
   final VoidCallback onSeeAllTodos; // switches to the Todo tab
   const HomeScreen({super.key, required this.onSeeAllTodos});
 
+  /// Header of a collapsible section: title + arrow (tap to expand/collapse)
+  /// and optional action buttons on the right.
+  Widget _header(BuildContext context, String title, bool open, VoidCallback toggle,
+      List<Widget> actions) {
+    final tt = Theme.of(context).textTheme.titleMedium;
+    return Row(children: [
+      Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: toggle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(children: [
+              AnimatedRotation(
+                turns: open ? 0 : -.25, // arrow points down when open
+                duration: const Duration(milliseconds: 180),
+                child: const Icon(Icons.expand_more),
+              ),
+              const SizedBox(width: 4),
+              Text(title, style: tt),
+            ]),
+          ),
+        ),
+      ),
+      ...actions,
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppState>();
     final regular = s.summaries.where((x) => x.account.isRegular).toList();
     final pending = s.todos.where((t) => !t.isDone).toList();
-    final tt = Theme.of(context).textTheme.titleMedium;
 
     return Scaffold(
       appBar: AppBar(
@@ -53,7 +80,8 @@ class HomeScreen extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
         child: Column(children: [
           const _ClockCard(),
-          if (regular.isNotEmpty) ...[
+          // each block below can be switched off in Settings -> Home screen
+          if (s.showDailyLimit && regular.isNotEmpty) ...[
             const SizedBox(height: 8),
             _DailyLimitCard(
                 available: s.regularAvailable,
@@ -64,79 +92,83 @@ class HomeScreen extends StatelessWidget {
                 receivedToday: s.todayIn,
                 hidden: s.hideBalances),
           ],
-          const SizedBox(height: 6),
-          // section header: the three big buttons were replaced by small
-          // icons here (add transaction, scheduled transactions)
-          Row(children: [
-            Expanded(child: Text('Regular accounts', style: tt)),
-            IconButton(
-              tooltip: 'Add transaction',
-              icon: const Icon(Icons.add_circle_outline),
-              onPressed: () {
-                if (s.accounts.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('Add a bank account in the Finance tab first.')));
-                  return;
-                }
-                Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const TransactionFormPage()));
-              },
-            ),
-            IconButton(
-              tooltip: 'Scheduled transactions',
-              icon: const Icon(Icons.schedule),
-              onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const TransactionsPage(
-                          title: 'Scheduled transactions',
-                          initial: TxnFilter(status: 'scheduled')))),
-            ),
-          ]),
-          // ── scrollable area 1: regular accounts (compact cards) ──
-          if (regular.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                  'No regular accounts yet. Mark an account as "Regular" in the Finance tab to see it here.'),
-            )
-          else
-            Expanded(
-              child: ListView(children: [
-                for (final r in regular)
-                  AccountCard(
-                    summary: r,
-                    hidden: s.isHidden(r.account.id!),
-                    onToggleHidden: () => s.toggleAccountHidden(r.account.id!),
-                    size: AccountCardSize.compact,
-                    showIndent: false,
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) =>
-                                AccountDetailPage(accountId: r.account.id!))),
-                  ),
-              ]),
-            ),
-          Row(children: [
-            Expanded(child: Text('Todos', style: tt)),
-            IconButton(
-              tooltip: 'Add todo',
-              icon: const Icon(Icons.add_circle_outline),
-              onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const TodoFormPage())),
-            ),
-            TextButton(onPressed: onSeeAllTodos, child: const Text('See all')),
-          ]),
-          // ── scrollable area 2: pending todos ──
-          if (pending.isEmpty)
-            const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('Nothing pending. 🎉'))
-          else
-            Expanded(
-              child: ListView(children: [for (final t in pending) TodoTile(todo: t)]),
-            ),
+
+          // ── accordion 1: regular accounts ──
+          if (s.showRegularAccounts) ...[
+            _header(context, 'Regular accounts', s.regularOpen,
+                () => s.toggleHomeSection(accounts: true), [
+              IconButton(
+                tooltip: 'Add transaction',
+                icon: const Icon(Icons.add_circle_outline),
+                onPressed: () {
+                  if (s.accounts.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Add a bank account in the Finance tab first.')));
+                    return;
+                  }
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const TransactionFormPage()));
+                },
+              ),
+              IconButton(
+                tooltip: 'Scheduled transactions',
+                icon: const Icon(Icons.schedule),
+                onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const TransactionsPage(
+                            title: 'Scheduled transactions',
+                            initial: TxnFilter(status: 'scheduled')))),
+              ),
+            ]),
+            if (s.regularOpen)
+              regular.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                          'No regular accounts yet. Mark an account as "Regular" in the Finance tab to see it here.'),
+                    )
+                  : Expanded(
+                      child: ListView(children: [
+                        for (final r in regular)
+                          AccountCard(
+                            summary: r,
+                            hidden: s.isHidden(r.account.id!),
+                            onToggleHidden: () => s.toggleAccountHidden(r.account.id!),
+                            size: AccountCardSize.compact,
+                            showIndent: false,
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        AccountDetailPage(accountId: r.account.id!))),
+                          ),
+                      ]),
+                    ),
+          ],
+
+          // ── accordion 2: todos ──
+          if (s.showTodoList) ...[
+            _header(context, 'Todos', s.todosOpen,
+                () => s.toggleHomeSection(accounts: false), [
+              IconButton(
+                tooltip: 'Add todo',
+                icon: const Icon(Icons.add_circle_outline),
+                onPressed: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const TodoFormPage())),
+              ),
+              TextButton(onPressed: onSeeAllTodos, child: const Text('See all')),
+            ]),
+            if (s.todosOpen)
+              pending.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('Nothing pending. 🎉'))
+                  : Expanded(
+                      child: ListView(
+                          children: [for (final t in pending) TodoTile(todo: t)]),
+                    ),
+          ],
         ]),
       ),
     );
@@ -235,7 +267,6 @@ class _DailyLimitCard extends StatelessWidget {
         ? null
         : (v > 0 ? creditColor(context) : debitColor(context));
 
-    final net = receivedToday - spentToday; // today's summary
     final remaining = originalPerDay - spentToday; // left of the day's limit
     final over = spentToday > 0 && remaining < 0;
 
@@ -352,53 +383,37 @@ class _DailyLimitCard extends StatelessWidget {
               backgroundColor: fg.withValues(alpha: .15),
             ),
           ),
+          // remaining / day-start limit, e.g. 125.00 / 500.00 (no label)
           const SizedBox(height: 4),
-          Row(children: [
-            Expanded(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text('Spent ${m(spentToday)}',
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text.rich(TextSpan(children: [
+                TextSpan(
+                    text: m(remaining),
                     style: TextStyle(
-                        fontSize: 12,
-                        color: (!hidden && spentToday > 0)
-                            ? debitColor(context)
-                            : fg)),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Text(
-                    over ? 'Over by ${m(-remaining)}' : 'Left ${m(remaining)}',
-                    style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: sign(remaining) ?? fg)),
-              ),
+                TextSpan(
+                    text: ' / ${m(originalPerDay)}',
+                    style: TextStyle(fontSize: 15, color: fg.withValues(alpha: .85))),
+              ])),
             ),
-          ]),
-
+          ),
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: 6),
             child: Divider(height: 1, color: fg.withValues(alpha: .2)),
           ),
 
-          // ── 3. the figures, two per line ──
+          // ── the two remaining figures on ONE line ──
           Row(children: [
             cell('Day-start limit', '${m(originalPerDay)} / day',
                 color: sign(originalPerDay),
                 onTap: () => showDailyLimitDetails(context, hidden: hidden)),
             const SizedBox(width: 12),
-            cell('Remaining today', m(remaining), color: sign(remaining), end: true),
-          ]),
-          const SizedBox(height: 6),
-          Row(children: [
-            cell('Received today', m(receivedToday), color: sign(receivedToday)),
-            const SizedBox(width: 12),
-            cell('Today summary', m(net), color: sign(net), end: true),
+            cell('Received today', m(receivedToday),
+                color: sign(receivedToday), end: true),
           ]),
         ]),
       ),

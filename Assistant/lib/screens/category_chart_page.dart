@@ -1,7 +1,7 @@
 // Charts: money IN and OUT by category for a chosen period.
 //
 //  * summary (in / out / net + proportion bar)
-//  * donut chart for the selected direction (Out or In)
+//  * donut OR bar chart (toggle) for the selected direction (Out or In)
 //  * category list with amount and percentage; tap = open those transactions
 //
 // Internal moves (self transfers and credit bill repayments) are excluded
@@ -48,6 +48,7 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
   DateTimeRange? _custom;
   bool _showOut = true; // true = money out (expenses), false = money in
   bool _includeScheduled = false;
+  bool _bars = false; // chart type: false = donut, true = bar chart
   bool _loading = true;
   List<_Slice> _allOut = []; // every category of the period (unfiltered)
   List<_Slice> _allIn = [];
@@ -326,17 +327,29 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
             ),
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Out (spent)'), icon: Icon(Icons.north_east)),
-                ButtonSegment(value: false, label: Text('In (received)'), icon: Icon(Icons.south_west)),
-              ],
-              selected: {_showOut},
-              onSelectionChanged: (v) => setState(() => _showOut = v.first),
+          Row(children: [
+            Expanded(
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: true, label: Text('Out'), icon: Icon(Icons.north_east)),
+                  ButtonSegment(value: false, label: Text('In'), icon: Icon(Icons.south_west)),
+                ],
+                selected: {_showOut},
+                onSelectionChanged: (v) => setState(() => _showOut = v.first),
+              ),
             ),
-          ),
+            const SizedBox(width: 10),
+            // chart type: donut / bar
+            SegmentedButton<bool>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: false, icon: Icon(Icons.donut_large), tooltip: 'Donut chart'),
+                ButtonSegment(value: true, icon: Icon(Icons.bar_chart), tooltip: 'Bar chart'),
+              ],
+              selected: {_bars},
+              onSelectionChanged: (v) => setState(() => _bars = v.first),
+            ),
+          ]),
           const SizedBox(height: 12),
           if (_loading)
             const Padding(
@@ -346,7 +359,10 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
                 padding: EdgeInsets.all(40),
                 child: Center(child: Text('No transactions in this period')))
           else ...[
-            // ── donut chart ──
+            // ── chart: donut or bars ──
+            if (_bars)
+              _barChart(slices, h)
+            else
             Center(
               child: SizedBox(
                 width: 230,
@@ -377,6 +393,62 @@ class _CategoryChartPageState extends State<CategoryChartPage> {
           ],
         ],
       ),
+    );
+  }
+
+  /// Short amount for the top of a bar: 1.2k, 3.4L (lakh), 1.1Cr (crore).
+  String _short(int paise) {
+    if (_hiddenNow) return '***';
+    final v = paise / 100;
+    if (v >= 10000000) return '${(v / 10000000).toStringAsFixed(1)}Cr';
+    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
+    return v.toStringAsFixed(0);
+  }
+
+  bool _hiddenNow = false;
+
+  /// Vertical bar chart: the 8 biggest categories (+ "Others") side by side,
+  /// bar height relative to the biggest one.
+  Widget _barChart(List<_Slice> slices, bool hidden) {
+    _hiddenNow = hidden;
+    final cs = Theme.of(context).colorScheme;
+    final top = slices.take(8).toList();
+    final restTotal = slices.skip(8).fold<int>(0, (a, s) => a + s.total);
+    final items = [...top, if (restTotal > 0) _Slice(-1, 'Others', 'more_horiz', restTotal)];
+    final maxV = items.fold<int>(1, (a, s) => math.max(a, s.total));
+    const maxBar = 150.0;
+    return SizedBox(
+      height: 250,
+      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        for (var i = 0; i < items.length; i++)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(_short(items[i].total),
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  height: math.max(4.0, items[i].total / maxV * maxBar),
+                  decoration: BoxDecoration(
+                    color: _palette[i % _palette.length],
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Icon(categoryIconFor(items[i].icon), size: 18, color: cs.onSurfaceVariant),
+                Text(items[i].name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant)),
+              ]),
+            ),
+          ),
+      ]),
     );
   }
 

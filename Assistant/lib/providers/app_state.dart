@@ -31,6 +31,11 @@ class AppState extends ChangeNotifier {
     themeMode = ThemeMode.values[(prefs.getInt('theme') ?? 0).clamp(0, 2)];
     hideBalances = prefs.getBool('hide_balances') ?? false;
     hideInRecents = prefs.getBool('hide_in_recents') ?? true;
+    showDailyLimit = prefs.getBool('home_daily') ?? true;
+    showRegularAccounts = prefs.getBool('home_accounts') ?? true;
+    showTodoList = prefs.getBool('home_todos') ?? true;
+    regularOpen = prefs.getBool('home_accounts_open') ?? true;
+    todosOpen = prefs.getBool('home_todos_open') ?? true;
     seedLight = prefs.getInt('seed_light') ?? kDefaultSeed;
     seedDark = prefs.getInt('seed_dark'); // null = same colour as light mode
     bgOpacity = prefs.getDouble('bg_opacity') ?? 0.35;
@@ -67,6 +72,39 @@ class AppState extends ChangeNotifier {
 
   ThemeMode themeMode = ThemeMode.system;
   bool hideBalances = false;
+
+  // ── Home screen: what is shown (Settings) and which accordions are open ──
+  bool showDailyLimit = true;
+  bool showRegularAccounts = true;
+  bool showTodoList = true;
+  bool regularOpen = true; // accordion state of "Regular accounts"
+  bool todosOpen = true; // accordion state of "Todos"
+
+  /// Shows / hides a Home section: 'home_daily' | 'home_accounts' | 'home_todos'.
+  Future<void> setHomeVisible(String key, bool v) async {
+    switch (key) {
+      case 'home_daily':
+        showDailyLimit = v;
+      case 'home_accounts':
+        showRegularAccounts = v;
+      case 'home_todos':
+        showTodoList = v;
+    }
+    await prefs.setBool(key, v);
+    notifyListeners();
+  }
+
+  /// Expands / collapses an accordion section of the Home screen.
+  Future<void> toggleHomeSection({required bool accounts}) async {
+    if (accounts) {
+      regularOpen = !regularOpen;
+      await prefs.setBool('home_accounts_open', regularOpen);
+    } else {
+      todosOpen = !todosOpen;
+      await prefs.setBool('home_todos_open', todosOpen);
+    }
+    notifyListeners();
+  }
 
   /// Hide the app in the recent-apps list + block screenshots (default on).
   bool hideInRecents = true;

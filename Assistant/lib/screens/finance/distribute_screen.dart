@@ -38,7 +38,10 @@ class _When {
 }
 
 class DistributeScreen extends StatefulWidget {
-  const DistributeScreen({super.key});
+  /// A past distribution to REPEAT: its accounts, percentages and values are
+  /// pre-filled (all editable). Accounts that no longer exist are skipped.
+  final Distribution? repeat;
+  const DistributeScreen({super.key, this.repeat});
   @override
   State<DistributeScreen> createState() => _DistributeScreenState();
 }
@@ -52,6 +55,55 @@ class _DistributeScreenState extends State<DistributeScreen> {
 
   /// Percentages may differ from 100 by this much because of 2-decimal rounding.
   static const _pctTolerance = 0.05;
+
+  @override
+  void initState() {
+    super.initState();
+    final r = widget.repeat;
+    if (r != null) _prefill(context.read<AppState>(), r);
+  }
+
+  /// Fills the form from a history entry. Values are NOT recalculated: they are
+  /// exactly the old ones, so the totals may not be 100 % any more (e.g. when
+  /// an account was deleted); the user corrects them before distributing.
+  void _prefill(AppState st, Distribution d) {
+    final existing = {for (final a in st.accounts) a.id};
+    if (d.fromAccountId != null && existing.contains(d.fromAccountId)) {
+      _from = d.fromAccountId;
+    }
+    _fromVal.text = paiseToInput(d.total);
+    final av = _available(st);
+    _fromPct.text = (_from != null && av > 0)
+        ? (d.total / av * 100).toStringAsFixed(2)
+        : '';
+    var skipped = 0;
+    for (final l in d.lines) {
+      final ok = l.toAccountId != null &&
+          existing.contains(l.toAccountId) &&
+          l.toAccountId != _from &&
+          !_lines.any((x) => x.account == l.toAccountId);
+      if (!ok) {
+        skipped++;
+        continue;
+      }
+      final line = _Line()..account = l.toAccountId;
+      line.pct.text = l.pct.toStringAsFixed(2);
+      line.val.text = paiseToInput(l.amount);
+      _lines.add(line);
+    }
+    if (_from == null) skipped++; // the source account is gone as well
+    if (skipped > 0 || _from == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          snack(
+              context,
+              _from == null
+                  ? 'The source account no longer exists: choose another one.'
+                  : '$skipped account${skipped == 1 ? '' : 's'} from the history no longer exist and were skipped. Check the totals.');
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -330,6 +382,12 @@ class _DistributeScreenState extends State<DistributeScreen> {
         Expanded(child: Text(accountPath(a, all), overflow: TextOverflow.ellipsis)),
       ]));
 
+  /// Smallest height of the scrollable TO list: two line cards (~142 each).
+  static const double _minListHeight = 300;
+
+  /// Height used by everything except the TO list (from card, totals, buttons).
+  static const double _fixedHeight = 470;
+
   @override
   Widget build(BuildContext context) {
     final st = context.watch<AppState>();
@@ -360,131 +418,152 @@ class _DistributeScreenState extends State<DistributeScreen> {
                   padding: EdgeInsets.all(24),
                   child: Text('You need at least two bank accounts to distribute a balance.',
                       textAlign: TextAlign.center)))
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-              children: [
-                const FormBanner(
-                  color: Colors.indigo,
-                  icon: Icons.call_split,
-                  title: 'Split a balance',
-                  subtitle: 'Creates one self transfer for every account below',
-                ),
-                // ── FROM ──
-                FormSection(
-                  title: 'From account',
-                  icon: Icons.call_made,
-                  children: [
-                    DropdownButtonFormField<int>(
-                      value: _from,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                          labelText: 'From bank account',
-                          prefixIcon: Icon(Icons.account_balance_outlined)),
-                      items: [for (final a in st.accounts) _accItem(a, st.accounts)],
-                      onChanged: (v) {
-                        _from = v;
-                        // the new source cannot also be a target
-                        for (final l in _lines.where((l) => l.account == v).toList()) {
-                          _removeLine(l);
-                        }
-                        _fromPctChanged(st); // recalculates and rebuilds
-                      },
-                    ),
-                    if (_from != null)
-                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Expanded(
-                          flex: 5,
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 2, right: 8),
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text('Available',
-                                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: Text(formatInr(available),
-                                    style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                        color: available < 0 ? debitColor(context) : null)),
-                              ),
-                            ]),
+          : LayoutBuilder(builder: (context, c) {
+              // The TO list gets all the free height (never less than two
+              // lines), so ONLY that list scrolls on normal screens.
+              final listHeight = (c.maxHeight - _fixedHeight).clamp(_minListHeight, 2000.0);
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                child: Column(children: [
+                  // ── FROM ──
+                  FormSection(
+                    title: 'From account',
+                    icon: Icons.call_made,
+                    children: [
+                      DropdownButtonFormField<int>(
+                        value: _from,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                            labelText: 'From bank account',
+                            prefixIcon: Icon(Icons.account_balance_outlined)),
+                        items: [for (final a in st.accounts) _accItem(a, st.accounts)],
+                        onChanged: (v) {
+                          _from = v;
+                          // the new source cannot also be a target
+                          for (final l in _lines.where((l) => l.account == v).toList()) {
+                            _removeLine(l);
+                          }
+                          // keep an already entered value (e.g. a repeated
+                          // distribution) and just recalculate its percentage
+                          if (_fromVal.text.trim().isNotEmpty) {
+                            _fromValChanged(st);
+                          } else {
+                            _fromPctChanged(st);
+                          }
+                        },
+                      ),
+                      if (_from != null)
+                        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Expanded(
+                            flex: 5,
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 2, right: 8),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('Available',
+                                    style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(formatInr(available),
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: available < 0 ? debitColor(context) : null)),
+                                ),
+                              ]),
+                            ),
                           ),
-                        ),
-                        Expanded(flex: 4, child: _pctField(_fromPct, () => _fromPctChanged(st))),
-                        const SizedBox(width: 8),
-                        Expanded(flex: 6, child: _valField(_fromVal, () => _fromValChanged(st))),
-                      ]),
-                    if (_from != null && total > available)
-                      Text('More than the available balance (${formatInr(available)}).',
-                          style: TextStyle(fontSize: 12, color: debitColor(context))),
-                  ],
-                ),
-                // ── TO ──
-                FormSection(
-                  title: 'To accounts',
-                  icon: Icons.call_received,
-                  children: [
-                    // totals: must reach 100 % and the FROM value
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                          color: cs.surfaceContainerHighest.withValues(alpha: .6),
-                          borderRadius: BorderRadius.circular(12)),
-                      child: Row(children: [
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text('Total percent',
-                                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-                            Text('${sumPct.toStringAsFixed(2)} %',
-                                style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: pctOk ? creditColor(context) : debitColor(context))),
-                            Text(pctOk ? 'complete' : '${(100 - sumPct).toStringAsFixed(2)} % to go',
-                                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-                          ]),
-                        ),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                            Text('Total value',
-                                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(formatInr(sumVal),
+                          Expanded(flex: 4, child: _pctField(_fromPct, () => _fromPctChanged(st))),
+                          const SizedBox(width: 8),
+                          Expanded(flex: 6, child: _valField(_fromVal, () => _fromValChanged(st))),
+                        ]),
+                      if (_from != null && total > available)
+                        Text('More than the available balance (${formatInr(available)}).',
+                            style: TextStyle(fontSize: 12, color: debitColor(context))),
+                    ],
+                  ),
+                  // ── TO (the list below scrolls on its own) ──
+                  FormSection(
+                    title: 'To accounts',
+                    icon: Icons.call_received,
+                    children: [
+                      // totals: must reach 100 % and the FROM value
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                            color: cs.surfaceContainerHighest.withValues(alpha: .6),
+                            borderRadius: BorderRadius.circular(12)),
+                        child: Row(children: [
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('Total percent',
+                                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                              Text('${sumPct.toStringAsFixed(2)} %',
                                   style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
-                                      color: valOk ? creditColor(context) : debitColor(context))),
-                            ),
-                            Text(valOk ? 'matches' : '${formatInr(total - sumVal)} to go',
-                                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-                          ]),
-                        ),
-                      ]),
+                                      color: pctOk ? creditColor(context) : debitColor(context))),
+                              Text(pctOk ? 'complete' : '${(100 - sumPct).toStringAsFixed(2)} % to go',
+                                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                            ]),
+                          ),
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                              Text('Total value',
+                                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(formatInr(sumVal),
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: valOk ? creditColor(context) : debitColor(context))),
+                              ),
+                              Text(valOk ? 'matches' : '${formatInr(total - sumVal)} to go',
+                                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                            ]),
+                          ),
+                        ]),
+                      ),
+                      // the scrollable list of target accounts
+                      SizedBox(
+                        height: listHeight,
+                        child: _lines.isEmpty
+                            ? Center(
+                                child: Text('No accounts added yet.',
+                                    style: TextStyle(color: cs.onSurfaceVariant)))
+                            : ListView.separated(
+                                padding: EdgeInsets.zero,
+                                itemCount: _lines.length,
+                                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                itemBuilder: (_, i) => _lineCard(st, i),
+                              ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: (_from == null || total <= 0 || free.isEmpty)
+                            ? null
+                            : () => _addLine(st),
+                        icon: const Icon(Icons.add),
+                        label: Text(_from == null || total <= 0
+                            ? 'Select the from account and a value first'
+                            : free.isEmpty
+                                ? 'No more accounts to add'
+                                : 'Add account'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _saving ? null : () => _distribute(st),
+                      icon: const Icon(Icons.call_split),
+                      label: const Text('Distribute'),
                     ),
-                    for (var i = 0; i < _lines.length; i++) _lineCard(st, i),
-                    OutlinedButton.icon(
-                      onPressed: (_from == null || total <= 0 || free.isEmpty)
-                          ? null
-                          : () => _addLine(st),
-                      icon: const Icon(Icons.add),
-                      label: Text(_from == null || total <= 0
-                          ? 'Select the from account and a value first'
-                          : free.isEmpty
-                              ? 'No more accounts to add'
-                              : 'Add account'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed: _saving ? null : () => _distribute(st),
-                  icon: const Icon(Icons.call_split),
-                  label: const Text('Distribute'),
-                ),
-              ],
-            ),
+                  ),
+                ]),
+              );
+            }),
     );
   }
 

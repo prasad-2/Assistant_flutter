@@ -196,6 +196,28 @@ class SettingsScreen extends StatelessWidget {
           value: s.hideBalances,
           onChanged: (_) => s.toggleHide(),
         ),
+        const _Header('Home screen'),
+        SwitchListTile(
+          secondary: const Icon(Icons.speed),
+          title: const Text('Daily limit'),
+          subtitle: const Text('Show the daily limit card on Home'),
+          value: s.showDailyLimit,
+          onChanged: (v) => s.setHomeVisible('home_daily', v),
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.account_balance_wallet_outlined),
+          title: const Text('Regular accounts'),
+          subtitle: const Text('Show the regular account list on Home'),
+          value: s.showRegularAccounts,
+          onChanged: (v) => s.setHomeVisible('home_accounts', v),
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.checklist),
+          title: const Text('Todo list'),
+          subtitle: const Text('Show pending todos on Home'),
+          value: s.showTodoList,
+          onChanged: (v) => s.setHomeVisible('home_todos', v),
+        ),
         const _Header('Finance'),
         ListTile(
           leading: const Icon(Icons.category_outlined),

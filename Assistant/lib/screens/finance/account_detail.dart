@@ -150,7 +150,7 @@ class AccountDetailPage extends StatelessWidget {
             ],
           ),
           // ── Transactions tab ──
-          TransactionsView(initial: TxnFilter(accountId: a.id)),
+          TransactionsView(initial: TxnFilter(accountId: a.id, status: 'actual')),
         ]),
       ),
     );
